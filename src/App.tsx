@@ -403,6 +403,7 @@ const AuditReview = ({
   expandedNarratives,
   narrativeLoading,
   loadNarrative,
+  exportToCSV,
   cn
 }: any) => (
   <div className="space-y-8 animate-in fade-in duration-500">
@@ -779,6 +780,8 @@ const CFOAudit = ({ passengers }: { passengers: Passenger[] }) => {
 
   // Auto-generate narratives for first 3 passengers on load
   useEffect(() => {
+    if (passengers.length === 0) return;
+
     const processedData = passengers.map(p => ({
       ...p,
       analysis: computeEngineLocal(p)
@@ -796,7 +799,7 @@ const CFOAudit = ({ passengers }: { passengers: Passenger[] }) => {
     if (processedData.length > 0) {
       setExpandedRows(new Set([processedData[0].pnr]));
     }
-  }, []);
+  }, [passengers]);
 
   const loadNarrative = async (pax: any) => {
     // Check cache first
@@ -1095,6 +1098,7 @@ const CFOAudit = ({ passengers }: { passengers: Passenger[] }) => {
             expandedNarratives={expandedNarratives}
             narrativeLoading={narrativeLoading}
             loadNarrative={loadNarrative}
+            exportToCSV={exportToCSV}
             cn={cn}
           />
         </>
@@ -1491,7 +1495,7 @@ const GateAgentTriage = ({ passengers, onUpdatePax }: { passengers: Passenger[],
                         onClick={() => setSelectedPaxUid(p.uid)}
                         className={cn(
                           "p-4 border-b border-gray-800 cursor-pointer transition-all relative group",
-                          isEscalated ? "bg-red-900/15 border-l-4 border-red-500" : isSelected ? "bg-indigo-500/20 border-l-4 border-indigo-500" : "hover:bg-[#1F2937]/50 border-l-4 border-transparent"
+                          isSelected ? "bg-indigo-500/20 border-l-4 border-indigo-500" : "hover:bg-[#1F2937]/50 border-l-4 border-transparent"
                         )}
                       >
                         <div className="flex justify-between items-start mb-2">
@@ -1505,18 +1509,18 @@ const GateAgentTriage = ({ passengers, onUpdatePax }: { passengers: Passenger[],
                           </div>
                           {isResolved ? (
                             <div className="flex flex-col items-end gap-1">
-                              <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100">
+                              <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded-full border border-emerald-500/30">
                                 <CheckCircle2 className="w-3 h-3" />
                                 <span className="text-[10px] font-bold uppercase tracking-wider">
                                   {isAuto ? analysis.recommendedAction : (p.overrideAction || analysis.recommendedAction)}
                                 </span>
                               </div>
-                              <span className="text-[9px] text-slate-400 font-medium">Notified: 5m ago</span>
+                              <span className="text-[9px] text-gray-600 font-medium">Notified: 5m ago</span>
                             </div>
                           ) : (
                             <div className={cn(
                               "flex items-center gap-1.5 px-2 py-1 rounded-full border",
-                              hasPriority ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-amber-50 text-amber-600 border-amber-100"
+                              hasPriority ? "bg-rose-500/20 text-rose-400 border-rose-500/30" : "bg-amber-500/20 text-amber-400 border-amber-500/30"
                             )}>
                               <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", hasPriority ? "bg-rose-500" : "bg-amber-500")} />
                               <span className="text-[10px] font-bold uppercase tracking-wider">
