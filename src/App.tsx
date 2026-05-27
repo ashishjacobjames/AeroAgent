@@ -244,9 +244,9 @@ const CFODashboard = ({
             <h4 className="text-[11px] font-bold font-display text-[#F9FAFB] uppercase tracking-wider">Resolution Strategy Split</h4>
             <span className="text-[10px] text-[#9CA3AF] font-medium">% of Total Cases</span>
           </div>
-          <div className="flex-1 flex flex-col justify-center">
-            <div className="h-10 w-full mb-6">
-              <ResponsiveContainer width="100%" height="100%">
+          <div className="flex-1 flex flex-col justify-center min-h-0">
+            <div className="h-[200px] w-full">
+              <ResponsiveContainer width="100%" height={200}>
                 <RechartsBarChart data={stackedBarData} layout="vertical" margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
                   <XAxis type="number" hide domain={[0, 100]} />
                   <YAxis type="category" dataKey="name" hide />
@@ -285,8 +285,8 @@ const CFODashboard = ({
             <h4 className="text-[11px] font-bold font-display text-[#F9FAFB] uppercase tracking-wider">Processing Mode</h4>
             <span className="text-[10px] text-[#9CA3AF] font-medium">Automation vs Manual</span>
           </div>
-          <div className="flex-1 relative">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="flex-1 relative min-h-0 h-[250px]">
+            <ResponsiveContainer width="100%" height={250}>
               <PieChart>
                 <Pie
                   data={processingModeData}
@@ -332,8 +332,8 @@ const CFODashboard = ({
             <h4 className="text-[11px] font-bold font-display text-[#F9FAFB] uppercase tracking-wider">Financial Outcome Flow</h4>
             <span className="text-[10px] text-[#9CA3AF] font-medium">EUR (€)</span>
           </div>
-          <div className="flex-1">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="flex-1 min-h-0 h-[250px]">
+            <ResponsiveContainer width="100%" height={250}>
               <RechartsBarChart data={waterfallData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#374151" />
                 <XAxis
