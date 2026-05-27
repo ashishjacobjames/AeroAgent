@@ -1,8 +1,7 @@
 node_modules
 .env.local
-.env
 *.log
-dist
 .git
-src
-public
+.claude
+.gitignore
+README.md
