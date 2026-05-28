@@ -111,9 +111,14 @@ Respond ONLY in valid JSON with this exact structure:
   }
 });
 
-// SPA fallback - serve index.html for all non-API routes
+// SPA fallback - serve index.html ONLY for actual page navigation
 app.use((req, res, next) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api')) {
+  // Don't rewrite: Vite routes, files with extensions, API routes
+  if (req.method === 'GET' &&
+      !req.path.startsWith('/api') &&
+      !req.path.startsWith('/@') &&
+      !req.path.includes('.') &&
+      req.path !== '/') {
     req.url = '/index.html';
   }
   next();
