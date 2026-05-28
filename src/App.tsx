@@ -811,7 +811,7 @@ const CFOAudit = ({ passengers }: { passengers: Passenger[] }) => {
     setNarrativeLoading(prev => new Set(prev).add(pax.uid));
 
     try {
-      const response = await fetch('http://localhost:3001/api/claude', {
+      const response = await fetch('/api/claude', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
