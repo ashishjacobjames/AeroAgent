@@ -688,7 +688,7 @@ export function computeEngineLocal(
       dutyOfCare: {
         local: legacyDutyOfCare,
         breakdown: rebookEligible
-          ? `Rebook (€${aeroAgentCostRaw}) + Hotel (€${hotelRequired ? pax.hotelCost : 0})`
+          ? `Rebook (€${aeroAgentCost}) + Hotel (€${hotelRequired ? pax.hotelCost : 0})`
           : `Meals (€${mealsRequired ? mealVoucherValue : 0})`,
       },
       eu261: {
