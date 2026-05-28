@@ -363,8 +363,8 @@ async function callClaudeAPI(
   console.log('[callClaudeAPI] API key found, length:', apiKey.length);
 
   const requestBody: AnthropicRequestBody = {
-    model: 'claude-opus-4-7',
-    max_tokens: 1024,
+    model: 'claude-3-5-sonnet-20241022',
+    max_tokens: 512,
     system: systemPrompt,
     messages: [
       {
