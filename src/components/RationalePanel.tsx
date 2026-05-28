@@ -197,6 +197,36 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
               ) : (
                 <div className="space-y-2">
                   {/* Line items only if > €0 */}
+                  {/* Regulatory Compensation (EU261/APPR/USDOT) */}
+                  {financialExposure.eu261.max > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-400">
+                        Regulatory Compensation ({payload.jurisdiction.primaryFramework})
+                      </span>
+                      <span className="font-mono font-bold text-gray-300">
+                        €{financialExposure.eu261.max.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                  {/* Duty of Care - Meals */}
+                  {financialExposure.dutyOfCare.local > 0 && financialExposure.dutyOfCare.meals.eligible && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-400">Duty of Care — Meals</span>
+                      <span className="font-mono font-bold text-gray-300">
+                        €{financialExposure.dutyOfCare.meals.voucherValue.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                  {/* Duty of Care - Hotel */}
+                  {financialExposure.dutyOfCare.local > 0 && financialExposure.dutyOfCare.hotel.eligible && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-400">Duty of Care — Hotel</span>
+                      <span className="font-mono font-bold text-gray-300">
+                        €150.00
+                      </span>
+                    </div>
+                  )}
+                  {/* Rebook Cost */}
                   {financialExposure.deterministic.oalRebook > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-400">Rebook Cost</span>
@@ -205,14 +235,7 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
                       </span>
                     </div>
                   )}
-                  {financialExposure.dutyOfCare.local > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Duty of Care</span>
-                      <span className="font-mono font-bold text-gray-300">
-                        €{financialExposure.dutyOfCare.local.toFixed(2)}
-                      </span>
-                    </div>
-                  )}
+                  {/* Total line - must equal sum of items above */}
                   <div className="flex justify-between text-sm font-bold border-t border-gray-700 pt-2 mt-2">
                     <span className="text-gray-300">Total</span>
                     <span className="font-mono text-white">
