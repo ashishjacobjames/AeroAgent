@@ -137,7 +137,7 @@ export function generateSeedData(): Passenger[] {
     { type: 'Special Cases', weight: 0.01, delayRange: [5, 24] },
   ];
 
-  while (passengers.length < 250) {
+  while (passengers.length < 50) {
     const scenarioType = weightedRandom(
       SCENARIO_DISTRIBUTION.map((s) => ({ type: s, weight: s.weight }))
     );
@@ -151,7 +151,7 @@ export function generateSeedData(): Passenger[] {
       Math.floor(Math.random() * 5 + 1)
     );
 
-    const actualSize = Math.min(partySize, 250 - passengers.length);
+    const actualSize = Math.min(partySize, 50 - passengers.length);
     if (actualSize <= 0) break;
 
     let pnr = generatePNR();
@@ -165,6 +165,10 @@ export function generateSeedData(): Passenger[] {
       let isEscalated = false;
       let uiStatus: PaxStatus = 'auto_processed';
 
+      // Distribute test cases: 85% auto_processed, 10% pending_triage, 5% escalated
+      const testRoll = Math.random();
+      const passengerIndex = passengers.length + i;
+
       if (scenarioType.type === 'Priority / Concierge') {
         tier = Math.random() > 0.5 ? 'Platinum Lumo' : 'Platinum';
         cabin = 'Business';
@@ -177,6 +181,23 @@ export function generateSeedData(): Passenger[] {
         scenarioType.type === 'Alternative Flight + Hotel'
       ) {
         uiStatus = Math.random() > 0.4 ? 'auto_processed' : 'pending_triage';
+      } else {
+        // For other scenarios, apply test case distribution
+        if (testRoll < 0.05) {
+          // 5% - Escalated cases (complex situations)
+          isEscalated = true;
+          uiStatus = 'pending_triage';
+          if (Math.random() > 0.5) {
+            ssrCode = Math.random() > 0.5 ? 'UMNR' : 'WCHR';
+          }
+        } else if (testRoll < 0.15) {
+          // 10% - Pending triage (high value customers, long delays, etc.)
+          uiStatus = 'pending_triage';
+          if (Math.random() > 0.6) {
+            tier = Math.random() > 0.5 ? 'Platinum Lumo' : 'Platinum';
+          }
+        }
+        // else: 85% remain as auto_processed
       }
 
       const ticketValue =
