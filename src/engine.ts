@@ -12,6 +12,132 @@ import {
 } from './types';
 import { differenceInHours, parseISO } from 'date-fns';
 
+// ============================================================================
+// FIX 1: DETERMINISTIC CHURN PROPENSITY (scaled by delay severity)
+// ============================================================================
+function getChurnPropensity(
+  delayHours: number,
+  disruptionType: string,
+  loyaltyTier: string,
+  handlingQuality: 'well-handled' | 'poor-handling' = 'well-handled'
+): number {
+  // Base propensity by disruption severity
+  let basePropensity = 0;
+  if (disruptionType === 'CANCELLATION') {
+    basePropensity = 0.25; // 25%
+  } else if (delayHours >= 300 / 60) { // 300 minutes
+    basePropensity = 0.20; // 20%
+  } else if (delayHours >= 180 / 60) { // 180 minutes
+    basePropensity = 0.12; // 12%
+  } else if (delayHours >= 90 / 60) { // 90 minutes
+    basePropensity = 0.05; // 5%
+  } else {
+    basePropensity = 0.01; // 1% for under 90 minutes
+  }
+
+  // Loyalty modifier (reduces base propensity for loyal customers)
+  let loyaltyModifier = 1.0;
+  if (loyaltyTier === 'Platinum') {
+    loyaltyModifier = 0.4; // More forgiving
+  } else if (loyaltyTier === 'Gold') {
+    loyaltyModifier = 0.6;
+  } else if (loyaltyTier === 'Silver') {
+    loyaltyModifier = 0.8;
+  } else {
+    loyaltyModifier = 1.0; // Standard
+  }
+
+  // Handling quality modifier
+  const handlingModifier = handlingQuality === 'well-handled' ? 0.5 : 1.5;
+
+  // Apply modifiers and cap at 45% maximum
+  const churnPropensity = Math.min(0.45, basePropensity * loyaltyModifier * handlingModifier);
+  return parseFloat(churnPropensity.toFixed(4)); // Deterministic, 4 decimal places
+}
+
+// ============================================================================
+// FIX 2: ACTION-GATED COST CALCULATION
+// ============================================================================
+function calculateAeroAgentCost(
+  primaryAction: string,
+  ticketValue: number,
+  oalCost: number,
+  hotelCost: number,
+  mealVoucherOffered: boolean,
+  mealVoucherValue: number,
+  dutyOfCareHotel: boolean,
+  dutyOfCareMeals: boolean
+): number {
+  let totalCost = 0;
+
+  // OAL rebook cost (€450) — ONLY if action is rebook
+  if (primaryAction === 'REBOOK_PARTNER' || primaryAction === 'REBOOK_INTERLINE') {
+    totalCost += 450;
+  }
+
+  // Hotel cost — ONLY if duty of care hotel is applicable
+  if (dutyOfCareHotel) {
+    totalCost += hotelCost;
+  }
+
+  // Meals (€20) — ONLY if duty of care meals is applicable
+  if (dutyOfCareMeals) {
+    totalCost += 20;
+  }
+
+  // Meal voucher (€15) — ONLY if offered
+  if (mealVoucherOffered) {
+    totalCost += mealVoucherValue || 15;
+  }
+
+  // Lounge (€0) — operational sunk cost, not charged
+  // Compensation — handled separately in regulatory calculation
+
+  return Math.max(0.1, parseFloat(totalCost.toFixed(2))); // Minimum €0.10 for notification
+}
+
+// ============================================================================
+// FIX 3: LEGACY PSS COST RECALIBRATION (scenario-dependent)
+// ============================================================================
+function calculateLegacyCost(
+  delayHours: number,
+  jurisdiction: string,
+  hasPremiumCabin: boolean,
+  overnightStrand: boolean
+): number {
+  let totalCost = 0;
+
+  // Notification cost (always)
+  totalCost += 0.50;
+
+  // Duty of care meals (if delay >= 120 minutes)
+  if (delayHours >= 2) {
+    totalCost += 45;
+  }
+
+  // Hotel (if overnight stranding)
+  if (overnightStrand) {
+    totalCost += 150;
+  }
+
+  // EU261/UK261 compensation (legacy always pays this, even with Article 5(3) exemptions)
+  if (jurisdiction.includes('EU261') || jurisdiction.includes('UK261')) {
+    totalCost += 600;
+  }
+
+  // US DOT (proxy for fare refund)
+  if (jurisdiction.includes('USDOT')) {
+    totalCost += 400;
+  }
+
+  // Premium over-service (legacy gives extra to premium passengers)
+  if (hasPremiumCabin) {
+    totalCost += 75;
+  }
+
+  return parseFloat(totalCost.toFixed(2));
+}
+
 export function computeEngineLocal(
   pax: Passenger,
   actionOverride?: ActionType
@@ -438,20 +564,22 @@ export function computeEngineLocal(
   // COST BREAKDOWN & FINANCIAL EXPOSURE
   // ============================================================================
 
-  let legacyDutyOfCare = 0;
-  if (pax.timing === 'Overnight' && hotelRequired) {
-    legacyDutyOfCare = pax.hotelCost;
-  } else if (mealsRequired) {
-    legacyDutyOfCare = 25;
-  } else if (delayHours >= 2) {
-    legacyDutyOfCare = 15;
-  }
+  // FIX 3: Legacy PSS Cost (scenario-dependent, not hardcoded)
+  const overnightStrand = pax.timing === 'Overnight' && hotelRequired;
+  const legacyDutyOfCare = calculateLegacyCost(
+    delayHours,
+    jurisdiction,
+    isPremiumCabin,
+    overnightStrand
+  );
 
   const eu261 = cashCompensationOwed ? cashCompensationAmount : 0;
   const usDot = cashCompensationCurrency === 'USD' && cashCompensationOwed ? cashCompensationAmount : 0;
-  const churnPenalty = isPremiumCabin || isPremiumTier ? 1200 : 300;
 
-  const legacyTotal = legacyDutyOfCare + eu261 + usDot + churnPenalty;
+  // FIX 3: No hardcoded churn penalty — replaced by CLV-based churnEV
+  const churnPenalty = 0; // Legacy model penalty removed, handled via churnEV
+
+  const legacyTotal = legacyDutyOfCare + eu261 + usDot;
   const legacy: CostBreakdown = {
     dutyOfCare: legacyDutyOfCare,
     eu261,
@@ -460,40 +588,46 @@ export function computeEngineLocal(
     total: legacyTotal,
   };
 
-  // Aero agent cost
-  let aeroAgentCostRaw = 0;
-  if (primaryAction.includes('REBOOK_SAME_METAL')) {
-    aeroAgentCostRaw = pax.ticketValue * 1.2 + (hotelRequired ? pax.hotelCost + 40 : 0);
-  } else if (primaryAction.includes('REBOOK_PARTNER')) {
-    aeroAgentCostRaw = pax.ticketValue * 1.5 + (hotelRequired ? pax.hotelCost + 40 : 0);
-  } else if (primaryAction.includes('REBOOK_INTERLINE')) {
-    aeroAgentCostRaw = pax.oalCost + (hotelRequired ? pax.hotelCost + 40 : 0) + 150;
-  } else if (primaryAction === 'REBOOK_AND_HOTEL') {
-    aeroAgentCostRaw = pax.ticketValue * 1.2 + pax.hotelCost + 40;
-  } else if (primaryAction === 'LOUNGE_ACCESS') {
-    aeroAgentCostRaw = 35;
-  } else if (primaryAction === 'MEAL_VOUCHER') {
-    aeroAgentCostRaw = mealVoucherValue || 20;
-  } else if (primaryAction === 'NOTIFICATION_ONLY') {
-    aeroAgentCostRaw = 0.1;
-  }
+  // FIX 2: AeroAgent Cost (action-gated, only charged costs if action warrants them)
+  const aeroAgentCost = calculateAeroAgentCost(
+    primaryAction,
+    pax.ticketValue,
+    pax.oalCost,
+    pax.hotelCost,
+    goodwillAction?.mealVoucherOffered ?? false,
+    mealVoucherValue,
+    dutyOfCareHotel,
+    dutyOfCareMeals
+  );
 
-  const aeroAgentCost = Math.round(aeroAgentCostRaw * 10) / 10;
   const netSavings = legacyTotal - aeroAgentCost;
 
-  // CLV and churn metrics
-  const clv = isPremiumCabin || isPremiumTier
-    ? 20000 + Math.random() * 10000
-    : 3000 + Math.random() * 4000;
-  const churnPropensity = isPremiumCabin || isPremiumTier
-    ? 0.08 + Math.random() * 0.08
-    : 0.05 + Math.random() * 0.1;
+  // FIX 1: Deterministic CLV and Churn Propensity (no Math.random())
+  const clv = isPremiumCabin || isPremiumTier ? 10000 : 3000; // Deterministic
+  const normalizedLoyaltyTier = (pax.tier || pax.loyaltyTier || 'Standard') as string;
+  const disruptionTypeStr = pax.disruptionType === 'CANCELLATION' ? 'CANCELLATION' : 'DELAY';
+  const churnPropensity = getChurnPropensity(
+    delayHours,
+    disruptionTypeStr,
+    normalizedLoyaltyTier,
+    'well-handled'
+  );
 
   const eu261Max = cashCompensationOwed ? cashCompensationAmount : 0;
-  const eu261Likelihood = cashCompensationOwed ? 0.4 + Math.random() * 0.4 : 0;
+  const eu261Likelihood = cashCompensationOwed ? 0.75 : 0; // Deterministic, realistic
   const eu261EV = eu261Max * eu261Likelihood;
   const churnEV = clv * churnPropensity;
   const totalEV = legacyDutyOfCare + eu261EV + usDot + churnEV;
+
+  // FIX 4: Extraordinary Circumstances Saving (EU261 weather/ATC exemption)
+  let extraordinaryCircumstancesSaving = 0;
+  if (
+    (pax.disruptionCause === 'WEATHER' || pax.disruptionCause === 'ATC') &&
+    (jurisdiction.includes('EU261') || jurisdiction.includes('UK261')) &&
+    delayHours >= 3
+  ) {
+    extraordinaryCircumstancesSaving = cashCompensationAmount;
+  }
 
   // Recommended action mapping for backward compatibility
   const recommendedAction: ActionType = primaryAction === 'NOTIFICATION_ONLY'
@@ -586,6 +720,10 @@ export function computeEngineLocal(
     },
   };
 
+  const regulatorySavingsPercent = legacyTotal > 0
+    ? (extraordinaryCircumstancesSaving / legacyTotal) * 100
+    : 0;
+
   return {
     isVIP: isPremiumCabin || isPremiumTier,
     isOALEligible: isPremiumCabin || isPremiumTier || isSpecialNeeds,
@@ -608,6 +746,10 @@ export function computeEngineLocal(
     churnPropensity,
     churnEV,
     totalEV,
+    extraordinaryCircumstancesSaving,
+    regulatorySavingsPercent,
+    distressLevel,
+    regulatoryBasis: regulatoryAssessment?.regulatoryNote || jurisdiction,
     liabilityEngine,
   };
 }

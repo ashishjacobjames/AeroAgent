@@ -22,6 +22,14 @@ interface RationalePanelProps {
   aiFlaggedIssues?: string[];
   aiAgentTalkingPoints?: string[];
   aiPowered?: boolean;
+  // New cost-related props (FIX 5)
+  aeroAgentCost?: number;
+  netSavings?: number;
+  churnPropensity?: number;
+  clv?: number;
+  extraordinaryCircumstancesSaving?: number;
+  regulatorySavingsPercent?: number;
+  isPremiumCabin?: boolean;
 }
 
 export const RationalePanel: React.FC<RationalePanelProps> = ({
@@ -39,6 +47,13 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
   aiFlaggedIssues,
   aiAgentTalkingPoints,
   aiPowered,
+  aeroAgentCost,
+  netSavings,
+  churnPropensity,
+  clv,
+  extraordinaryCircumstancesSaving,
+  regulatorySavingsPercent,
+  isPremiumCabin,
 }) => {
   const { jurisdiction, financialExposure } = payload;
 
@@ -167,216 +182,152 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
           </div>
         )}
 
-        <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-          {legacyTotal !== undefined && (
-            <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700 shadow-sm">
-              <p className="text-[8px] font-bold text-gray-500 uppercase mb-1 tracking-widest">
-                LEGACY COST (PSS)
-              </p>
-              <p className="text-xl font-bold font-mono tabular-nums text-warning-crimson">
-                €
-                {legacyTotal.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-              </p>
-              <p className="text-[8px] text-gray-600 mt-1 italic">
-                * Original system logic
-              </p>
+        {/* ===== FIX 5: NEW 5-SECTION COST DISPLAY ===== */}
+        <div className="mt-5 space-y-4">
+          {/* SECTION 1: WHAT WAS SPENT */}
+          {aeroAgentCost !== undefined && (
+            <div className="p-4 bg-gray-800/30 rounded-lg border border-gray-700">
+              <h5 className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+                AeroAgent Recovery Cost
+              </h5>
+              {aeroAgentCost <= 0.1 ? (
+                <p className="text-sm text-gray-400 italic">
+                  Notification only — minimal operational cost
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {/* Line items only if > €0 */}
+                  {financialExposure.deterministic.oalRebook > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-400">Rebook Cost</span>
+                      <span className="font-mono font-bold text-gray-300">
+                        €{financialExposure.deterministic.oalRebook.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                  {financialExposure.dutyOfCare.local > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-400">Duty of Care</span>
+                      <span className="font-mono font-bold text-gray-300">
+                        €{financialExposure.dutyOfCare.local.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm font-bold border-t border-gray-700 pt-2 mt-2">
+                    <span className="text-gray-300">Total</span>
+                    <span className="font-mono text-white">
+                      €{aeroAgentCost.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700 shadow-sm transition-all hover:border-indigo-500/50">
-            <p className="text-[8px] font-bold text-gray-500 uppercase mb-1 tracking-widest">
-              EST. DUTY OF CARE (LOCAL)
-            </p>
-            <Tooltip
-              content={
-                financialExposure.dutyOfCare.breakdown
-              }
-            >
-              <p className="text-xl font-bold font-mono tabular-nums text-gray-200 cursor-help underline decoration-dotted decoration-gray-600 underline-offset-4">
-                €
-                {financialExposure.dutyOfCare.local.toLocaleString(
-                  undefined,
-                  {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }
+          {/* SECTION 2: LEGACY COMPARISON */}
+          {legacyTotal !== undefined && (
+            <div className="p-4 bg-gray-800/30 rounded-lg border border-gray-700">
+              <h5 className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+                Without AeroAgent (estimated)
+              </h5>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Legacy estimated spend</span>
+                  <span className="font-mono font-bold text-gray-300">
+                    €{legacyTotal.toFixed(2)}
+                  </span>
+                </div>
+                <p className="text-[8px] text-gray-600 italic">
+                  Based on industry standard handling
+                </p>
+                {netSavings !== undefined && (
+                  <div className={`flex justify-between text-sm font-bold border-t border-gray-700 pt-2 mt-2 ${netSavings > 0 ? 'text-green-400' : 'text-amber-400'}`}>
+                    <span>Net Saving</span>
+                    <span className="font-mono">
+                      €{netSavings.toFixed(2)}
+                    </span>
+                  </div>
                 )}
-              </p>
-            </Tooltip>
-            <p className="text-[8px] text-gray-600 mt-1 italic">
-              * Dynamic variable cost
-            </p>
-          </div>
-
-          <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700 shadow-sm transition-all hover:border-indigo-500/50">
-            <div className="flex items-center gap-1 mb-1">
-              <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">
-                EU261 EXPOSURE (EV)
-              </p>
-              <Sparkles className="w-2.5 h-2.5 text-indigo-500" />
+              </div>
             </div>
-            <p className="text-xl font-bold font-mono tabular-nums text-gray-200">
-              €
-              {financialExposure.eu261.ev.toLocaleString(
-                undefined,
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}
-            </p>
-            <p className="text-[9px] text-gray-600 font-sans mt-0.5">
-              Max: €
-              {financialExposure.eu261.max.toLocaleString(
-                undefined,
-                { maximumFractionDigits: 0 }
-              )}{' '}
-              | {(financialExposure.eu261.likelihood * 100).toFixed(0)}%
-              Likelihood
-            </p>
-          </div>
+          )}
 
-          <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700 shadow-sm transition-all hover:border-indigo-500/50">
-            <div className="flex items-center gap-1 mb-1">
-              <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">
-                CHURN RISK (EV)
+          {/* SECTION 3: REGULATORY OPTIMIZATION (conditional) */}
+          {extraordinaryCircumstancesSaving && extraordinaryCircumstancesSaving > 0 && (
+            <div className="p-4 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-emerald-400 text-lg">✓</span>
+                <h5 className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest">
+                  Regulatory Optimisation
+                </h5>
+              </div>
+              <p className="text-sm text-emerald-300 mb-3">
+                Compensation correctly waived under EU261 Article 5(3)
               </p>
-              <Sparkles className="w-2.5 h-2.5 text-indigo-500" />
+              <div className="flex justify-between items-center text-sm font-bold text-emerald-300">
+                <span>Amount Preserved</span>
+                <span className="font-mono">€{extraordinaryCircumstancesSaving.toFixed(2)}</span>
+              </div>
             </div>
-            <p className="text-xl font-bold font-mono tabular-nums text-gray-200">
-              €
-              {financialExposure.churn.ev.toLocaleString(
-                undefined,
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}
-            </p>
-            <p className="text-[9px] text-gray-600 font-sans mt-0.5">
-              CLV: €
-              {financialExposure.churn.clv.toLocaleString(
-                undefined,
-                { maximumFractionDigits: 0 }
-              )}{' '}
-              | {(financialExposure.churn.propensity * 100).toFixed(1)}%
-              Propensity
-            </p>
-          </div>
+          )}
 
-          <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700 shadow-sm transition-all hover:border-indigo-500/50">
-            <p className="text-[8px] font-bold text-gray-500 uppercase mb-1 tracking-widest">
-              TOTAL AERO COST (EV)
-            </p>
-            <p className="text-xl font-bold font-mono tabular-nums text-aero-teal">
-              €
-              {financialExposure.totalAero.ev.toLocaleString(
-                undefined,
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}
-            </p>
-            <p className="text-[9px] text-gray-600 font-sans mt-0.5">
-              Total Expected Liability
+          {/* SECTION 4: CHURN RISK */}
+          {churnPropensity !== undefined && clv !== undefined && (
+            <div className="p-4 bg-gray-800/30 rounded-lg border border-gray-700">
+              <h5 className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+                Passenger Retention Risk
+              </h5>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Churn Propensity</span>
+                  <span className="font-mono font-bold text-gray-300">
+                    {(churnPropensity * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Customer Lifetime Value</span>
+                  <span className="font-mono font-bold text-gray-300">
+                    €{clv.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Expected Churn Cost</span>
+                  <span className="font-mono font-bold text-gray-300">
+                    €{(clv * churnPropensity).toFixed(2)}
+                  </span>
+                </div>
+                <p className="text-[8px] text-gray-600 italic mt-2">
+                  * Indicative, based on industry benchmarks
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 5: METHODOLOGY NOTE */}
+          <div className="p-3 bg-gray-900/50 rounded-lg border border-gray-700">
+            <div className="flex items-center gap-2 mb-2">
+              <Info className="w-3 h-3 text-gray-500" />
+              <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">
+                Cost Model Methodology
+              </p>
+            </div>
+            <p className="text-[8px] text-gray-600 leading-relaxed">
+              Regulatory amounts: EU261/2004, US DOT, Canada APPR fixed schedules. Operational costs: Industry benchmarks. Churn impact: Airline loyalty research. All figures indicative — live PSS/GDS/CRM integration replaces benchmarks with exact operational data.
             </p>
           </div>
         </div>
       </div>
 
+      {/* Right sidebar - keep existing expense breakdown if needed */}
+      {false && (
       <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700 shadow-sm h-fit">
         <div className="mb-3">
           <h5 className="text-[9px] font-bold font-display text-gray-500 uppercase tracking-widest">
-            Deterministic Costs
+            Additional Detail
           </h5>
         </div>
-        <div className="space-y-2.5">
-          <div className="flex justify-between items-center text-[11px]">
-            <span className="text-gray-400">OAL Rebook Cost</span>
-            <span className="font-mono tabular-nums font-bold text-gray-300">
-              €
-              {financialExposure.deterministic.oalRebook.toLocaleString(
-                undefined,
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}
-            </span>
-          </div>
-          <div className="flex justify-between items-center text-[11px]">
-            <span className="text-gray-400">
-              Est. Duty of Care
-            </span>
-            <span className="font-mono tabular-nums font-bold text-gray-300">
-              €
-              {financialExposure.deterministic.dutyOfCare.toLocaleString(
-                undefined,
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}
-            </span>
-          </div>
-
-          <div className="my-3 border-b border-gray-700" />
-
-          <div className="mb-3 flex items-center gap-2">
-            <h5 className="text-[9px] font-bold font-display text-gray-500 uppercase tracking-widest">
-              Predictive Costs
-            </h5>
-            <Sparkles className="w-2.5 h-2.5 text-indigo-500" />
-          </div>
-
-          <div className="flex justify-between items-center text-[11px]">
-            <span className="text-gray-400">Expected EU261</span>
-            <span className="font-mono tabular-nums font-bold text-gray-300">
-              €
-              {financialExposure.predictive.expectedEU261.toLocaleString(
-                undefined,
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}
-            </span>
-          </div>
-          <div className="flex justify-between items-center text-[11px]">
-            <span className="text-gray-400">Expected Churn</span>
-            <span className="font-mono tabular-nums font-bold text-gray-300">
-              €
-              {financialExposure.predictive.expectedChurn.toLocaleString(
-                undefined,
-                {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }
-              )}
-            </span>
-          </div>
-
-          <div className="pt-3 mt-3 border-t border-gray-700 flex justify-between items-center">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-              Optimized Path
-            </span>
-            <span
-              className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest border"
-              style={{
-                color: financialExposure.optimizedPath.color,
-                backgroundColor: `${financialExposure.optimizedPath.color}10`,
-                borderColor: `${financialExposure.optimizedPath.color}20`,
-              }}
-            >
-              {financialExposure.optimizedPath.label}
-            </span>
-          </div>
-        </div>
       </div>
+      )}
       </div>
     </div>
   );

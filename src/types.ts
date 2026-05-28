@@ -176,6 +176,12 @@ export interface CostBreakdown {
   usDot: number;
   churnPenalty: number;
   total: number;
+  oalRebookCost?: number;
+  mealVoucherCost?: number;
+  hotelCost?: number;
+  loungeCost?: number;
+  compensationCost?: number;
+  extraordinaryCircumstancesSaving?: number;
 }
 
 export interface AnalysisResult {
@@ -200,6 +206,10 @@ export interface AnalysisResult {
   churnPropensity: number;
   churnEV: number;
   totalEV: number;
+  extraordinaryCircumstancesSaving?: number;
+  regulatorySavingsPercent?: number;
+  distressLevel?: string;
+  regulatoryBasis?: string;
   liabilityEngine?: DisruptionLiabilityEngine;
   aiJustification?: string;
   aiDistressLevel?: 'Critical' | 'High' | 'Medium' | 'Low';

@@ -97,6 +97,45 @@ const SubNav = ({ active, onChange }: { active: 'dashboard' | 'audit', onChange:
   </div>
 );
 
+// FIX 6: Collapsible Methodology Panel Component
+const MethodologyPanel = () => {
+  const [isExpanded, setIsExpanded] = React.useState(false);
+
+  return (
+    <div className="bg-gray-800/30 rounded-lg border border-gray-700 overflow-hidden">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-700/20 transition-colors"
+      >
+        <ChevronDown
+          className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+        />
+        <Info className="w-4 h-4 text-gray-500" />
+        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+          About These Numbers
+        </span>
+      </button>
+
+      {isExpanded && (
+        <div className="px-4 py-3 border-t border-gray-700 space-y-2 text-[8px] text-gray-500 leading-relaxed">
+          <p>
+            <span className="font-bold text-gray-400">Regulatory Amounts:</span> Fixed by EU261/2004, US DOT, and Canada APPR schedules. Not estimated.
+          </p>
+          <p>
+            <span className="font-bold text-gray-400">Operational Costs:</span> Industry benchmarks for duty of care, rebook logistics, and service delivery.
+          </p>
+          <p>
+            <span className="font-bold text-gray-400">Churn Impact:</span> Airline loyalty research on lifetime value and disruption-driven defection.
+          </p>
+          <p className="pt-2 border-t border-gray-700">
+            <span className="font-bold text-gray-400">All figures marked "Indicative"</span> — live PSS/GDS/CRM integration replaces benchmarks with exact operational data.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CFODashboard = ({
   kpis,
   secondaryKpis,
@@ -108,6 +147,11 @@ const CFODashboard = ({
   narrativeCache,
   filteredData
 }: any) => {
+  // FIX 6: Calculate Regulatory Savings (EU261 extraordinary circumstances)
+  const regulatorySavings = (filteredData || []).reduce((acc: number, p: any) => {
+    return acc + (p.analysis?.extraordinaryCircumstancesSaving || 0);
+  }, 0);
+
   const stackedBarData = [
     {
       name: 'Strategies',
@@ -153,14 +197,20 @@ const CFODashboard = ({
           subtitle="Total volume in period"
           trend={{ value: "+2.4%", positive: false }}
         />
-        <KPICard
-          label="Gross Exposure Avoided"
-          value={`€${kpis.legacy.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-          icon={TrendingUp}
-          color="bg-warning-crimson"
-          subtitle="Projected PSS Logic Risk"
-          trend={{ value: "+12.1%", positive: false }}
-        />
+        {/* FIX 6: Add "Indicative" label */}
+        <div className="relative">
+          <KPICard
+            label="Gross Exposure Avoided"
+            value={`€${kpis.legacy.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            icon={TrendingUp}
+            color="bg-warning-crimson"
+            subtitle="Projected PSS Logic Risk"
+            trend={{ value: "+12.1%", positive: false }}
+          />
+          <div className="absolute top-2 right-2 px-2 py-1 bg-gray-700 rounded text-[8px] font-bold text-gray-400 uppercase tracking-wider">
+            Indicative
+          </div>
+        </div>
         <KPICard
           label="Actual Recovery Cost"
           value={`€${kpis.aero.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
@@ -169,15 +219,35 @@ const CFODashboard = ({
           subtitle="Optimized Decision Path"
           trend={{ value: "-18.4%", positive: true }}
         />
-        <KPICard
-          label="Net Savings Delivered"
-          value={`€${kpis.savings.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-          icon={DollarSign}
-          color="bg-aero-teal"
-          subtitle={`${kpis.savingsPercent.toFixed(1)}% Cost Reduction`}
-          trend={{ value: "+4.2%", positive: true }}
-        />
+        {/* FIX 6: Add "Indicative" label and new Regulatory Savings card */}
+        <div className="relative">
+          <KPICard
+            label="Net Savings Delivered"
+            value={`€${kpis.savings.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            icon={DollarSign}
+            color="bg-aero-teal"
+            subtitle={`${kpis.savingsPercent.toFixed(1)}% Cost Reduction`}
+            trend={{ value: "+4.2%", positive: true }}
+          />
+          <div className="absolute top-2 right-2 px-2 py-1 bg-gray-700 rounded text-[8px] font-bold text-gray-400 uppercase tracking-wider">
+            Indicative
+          </div>
+        </div>
       </section>
+
+      {/* FIX 6: New Regulatory Savings KPI Card */}
+      {regulatorySavings > 0 && (
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <KPICard
+            label="Regulatory Savings"
+            value={`€${regulatorySavings.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            icon={CheckCircle2}
+            color="bg-emerald-600"
+            subtitle="Compensation correctly withheld on extraordinary circumstances"
+            trend={{ value: "EU261 Article 5(3)", positive: true }}
+          />
+        </section>
+      )}
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
@@ -237,6 +307,9 @@ const CFODashboard = ({
           subtitle="Audited and documented"
         />
       </section>
+
+      {/* FIX 6: Collapsible Methodology Panel */}
+      <MethodologyPanel />
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="bg-#111827 border border-gray-800 rounded-xl p-4 shadow-sm h-[300px] flex flex-col hover:border-gray-700 transition-all">
@@ -621,6 +694,13 @@ const AuditReview = ({
                                 aiRegulatoryBasis={p.analysis.aiRegulatoryBasis}
                                 aiRegulatoryNote={p.analysis.aiRegulatoryNote}
                                 aiPowered={p.analysis.aiPowered}
+                                aeroAgentCost={p.analysis.aeroAgentCost}
+                                netSavings={p.analysis.netSavings}
+                                churnPropensity={p.analysis.churnPropensity}
+                                clv={p.analysis.clv}
+                                extraordinaryCircumstancesSaving={p.analysis.extraordinaryCircumstancesSaving}
+                                regulatorySavingsPercent={p.analysis.regulatorySavingsPercent}
+                                isPremiumCabin={p.cabin === 'Business' || p.cabin === 'F'}
                               />
                             )}
                           </motion.div>
