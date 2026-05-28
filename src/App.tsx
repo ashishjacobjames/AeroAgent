@@ -2181,7 +2181,13 @@ const PassengerExperience = ({ passengers, onUpdatePax }: { passengers: Passenge
         setWhatsappMessage(data);
         setConversationPhase('awaiting-action');
       } else {
-        throw new Error('Failed to generate message');
+        const errorText = await response.text();
+        console.error('[WhatsApp Message API]', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        });
+        throw new Error(`WhatsApp message failed: ${response.status}`);
       }
     } catch (err) {
       console.error('Failed to load WhatsApp message:', err);

@@ -1,8 +1,13 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config({ path: '.env.local' });
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '.env.local') });
+
+console.log('[Dev Server] Loaded API Key:', process.env.ANTHROPIC_API_KEY ? 'YES (set)' : 'NO (missing)');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -66,7 +71,7 @@ Respond ONLY in valid JSON with this exact structure:
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-opus-4-7',
         max_tokens: 1024,
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }]
