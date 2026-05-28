@@ -276,7 +276,7 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
           )}
 
           {/* SECTION 3: REGULATORY OPTIMIZATION (conditional) */}
-          {extraordinaryCircumstancesSaving && extraordinaryCircumstancesSaving > 0 && (
+          {extraordinaryCircumstancesSaving !== undefined && extraordinaryCircumstancesSaving > 0 && (
             <div className="p-4 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-emerald-400 text-lg">✓</span>
