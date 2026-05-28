@@ -209,7 +209,7 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
                     </div>
                   )}
                   {/* Duty of Care - Meals */}
-                  {financialExposure.dutyOfCare.local > 0 && financialExposure.dutyOfCare.meals.eligible && (
+                  {financialExposure.dutyOfCare.local > 0 && financialExposure.dutyOfCare.meals && financialExposure.dutyOfCare.meals.eligible && (
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-400">Duty of Care — Meals</span>
                       <span className="font-mono font-bold text-gray-300">
@@ -218,7 +218,7 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
                     </div>
                   )}
                   {/* Duty of Care - Hotel */}
-                  {financialExposure.dutyOfCare.local > 0 && financialExposure.dutyOfCare.hotel.eligible && (
+                  {financialExposure.dutyOfCare.local > 0 && financialExposure.dutyOfCare.hotel && financialExposure.dutyOfCare.hotel.eligible && (
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-400">Duty of Care — Hotel</span>
                       <span className="font-mono font-bold text-gray-300">
