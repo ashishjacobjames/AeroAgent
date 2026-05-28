@@ -19,8 +19,9 @@ const startViteServer = async () => {
     server: { middlewareMode: true },
     appType: 'spa',
   });
-  app.use(vite.middlewares);
 };
+
+// Note: API routes defined BEFORE vite.middlewares to ensure they take precedence
 
 // API endpoint for Claude
 app.post('/api/claude', async (req, res) => {
@@ -110,10 +111,10 @@ Respond ONLY in valid JSON with this exact structure:
   }
 });
 
-// SPA fallback
+// SPA fallback - serve index.html for all non-API routes
 app.use((req, res, next) => {
   if (req.method === 'GET' && !req.path.startsWith('/api')) {
-    res.redirect('/');
+    req.url = '/index.html';
   }
   next();
 });
@@ -122,6 +123,9 @@ const PORT = process.env.PORT || 3000;
 
 (async () => {
   await startViteServer();
+
+  // Add Vite middleware LAST, after all API routes
+  app.use(vite.middlewares);
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n✓ Dev server running at http://localhost:${PORT}/`);
