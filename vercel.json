@@ -3,9 +3,6 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "devCommand": "node dev-server.js",
-  "env": {
-    "ANTHROPIC_API_KEY": "@anthropic-api-key"
-  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
