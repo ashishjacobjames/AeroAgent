@@ -1,10 +1,9 @@
 import React from 'react';
-import { Info, Sparkles, AlertTriangle } from 'lucide-react';
+import { Info, AlertTriangle } from 'lucide-react';
 import {
   DisruptionLiabilityEngine,
   ActionType,
 } from '../types';
-import { Tooltip } from './UI';
 import { cn } from '../types';
 
 interface RationalePanelProps {
@@ -13,7 +12,6 @@ interface RationalePanelProps {
   recommendedAction: ActionType;
   overrideAction?: ActionType;
   overrideRationale?: string;
-  legacyTotal?: number;
   aiJustification?: string;
   aiDistressLevel?: 'Critical' | 'High' | 'Medium' | 'Low';
   aiDistressReason?: string;
@@ -24,12 +22,9 @@ interface RationalePanelProps {
   aiPowered?: boolean;
   // New cost-related props (FIX 5)
   aeroAgentCost?: number;
-  netSavings?: number;
   churnPropensity?: number;
   clv?: number;
   extraordinaryCircumstancesSaving?: number;
-  regulatorySavingsPercent?: number;
-  isPremiumCabin?: boolean;
 }
 
 export const RationalePanel: React.FC<RationalePanelProps> = ({
@@ -38,7 +33,6 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
   recommendedAction,
   overrideAction,
   overrideRationale,
-  legacyTotal,
   aiJustification,
   aiDistressLevel,
   aiDistressReason,
@@ -48,20 +42,17 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
   aiAgentTalkingPoints,
   aiPowered,
   aeroAgentCost,
-  netSavings,
   churnPropensity,
   clv,
   extraordinaryCircumstancesSaving,
-  regulatorySavingsPercent,
-  isPremiumCabin,
 }) => {
   const { jurisdiction, financialExposure } = payload;
 
   const distressColors: Record<string, string> = {
-    Critical: 'bg-red-500/20 text-red-400 border-red-500/30',
-    High: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+    Critical: 'bg-red-500/20 text-red-700 border-red-500/30',
+    High: 'bg-orange-500/20 text-orange-700 border-orange-500/30',
     Medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    Low: 'bg-green-500/20 text-green-400 border-green-500/30'
+    Low: 'bg-green-500/20 text-green-700 border-green-500/30'
   };
 
   return (
@@ -69,21 +60,21 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
       {aiPowered && (
         <div className="bg-indigo-500/5 border-l-2 border-indigo-500 rounded-lg p-5">
           <div className="flex items-center gap-2 mb-4">
-            <span className="text-indigo-400 text-lg">✦</span>
-            <h4 className="text-[11px] font-bold font-display text-indigo-300 uppercase tracking-widest">AI Recovery Analysis</h4>
+            <span className="text-indigo-600 text-lg">✦</span>
+            <h4 className="text-[11px] font-bold font-display text-indigo-700 uppercase tracking-widest">AI Recovery Analysis</h4>
           </div>
 
           <div className="space-y-4">
             <div className="bg-indigo-950/30 border border-indigo-500/20 rounded-lg p-3.5">
-              <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest mb-2">Gate Agent Reasoning</p>
-              <p className="text-sm text-gray-300 leading-relaxed">{aiJustification}</p>
+              <p className="text-[9px] font-bold text-indigo-600 uppercase tracking-widest mb-2">Gate Agent Reasoning</p>
+              <p className="text-sm text-gray-600 leading-relaxed">{aiJustification}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               {aiDistressLevel && (
                 <div>
                   <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest mb-1">Distress Level</p>
-                  <div className={cn('px-3 py-2 rounded-lg border text-[11px] font-bold', distressColors[aiDistressLevel] || 'bg-gray-500/20 text-gray-400 border-gray-500/30')}>
+                  <div className={cn('px-3 py-2 rounded-lg border text-[11px] font-bold', distressColors[aiDistressLevel] || 'bg-gray-500/20 text-gray-500 border-gray-500/30')}>
                     {aiDistressLevel}
                   </div>
                   {aiDistressReason && (
@@ -95,7 +86,7 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
               {aiRegulatoryBasis && (
                 <div>
                   <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest mb-1">Regulatory Basis</p>
-                  <div className="px-3 py-2 rounded-lg border border-gray-600 bg-gray-900/30 text-[11px] font-bold text-gray-300">
+                  <div className="px-3 py-2 rounded-lg border border-gray-300 bg-gray-50 text-[11px] font-bold text-gray-600">
                     {aiRegulatoryBasis}
                   </div>
                   {aiRegulatoryNote && (
@@ -107,11 +98,11 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
 
             {aiAgentTalkingPoints && aiAgentTalkingPoints.length > 0 && (
               <div className="border-t border-indigo-500/20 pt-3">
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-2">When speaking to the passenger:</p>
+                <p className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-2">When speaking to the passenger:</p>
                 <ul className="space-y-1.5">
                   {aiAgentTalkingPoints.map((point, idx) => (
-                    <li key={idx} className="text-[9px] text-gray-300 leading-relaxed flex gap-2">
-                      <span className="text-indigo-400 font-bold">•</span>
+                    <li key={idx} className="text-[9px] text-gray-600 leading-relaxed flex gap-2">
+                      <span className="text-indigo-600 font-bold">•</span>
                       <span>{point}</span>
                     </li>
                   ))}
@@ -121,10 +112,10 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
 
             {aiFlaggedIssues && aiFlaggedIssues.length > 0 && (
               <div className="bg-amber-500/20 border border-amber-500/30 rounded-lg p-3 mt-3">
-                <p className="text-[9px] font-bold text-amber-300 uppercase tracking-widest mb-2">⚠ Flagged Issues</p>
+                <p className="text-[9px] font-bold text-amber-800 uppercase tracking-widest mb-2">⚠ Flagged Issues</p>
                 <ul className="space-y-1">
                   {aiFlaggedIssues.map((issue, idx) => (
-                    <li key={idx} className="text-[8px] text-amber-200 leading-relaxed flex gap-2">
+                    <li key={idx} className="text-[8px] text-amber-800 leading-relaxed flex gap-2">
                       <span>•</span>
                       <span>{issue}</span>
                     </li>
@@ -133,7 +124,7 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
               </div>
             )}
 
-            <p className="text-[8px] text-gray-600 italic text-center pt-2 border-t border-indigo-500/20">Powered by Claude · Anthropic</p>
+            <p className="text-[8px] text-gray-600 italic text-center pt-2 border-t border-indigo-500/20">AeroAgent · Powered by Claude AI</p>
           </div>
         </div>
       )}
@@ -145,7 +136,7 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
             <h5 className="text-[10px] font-bold font-display text-gray-500 uppercase tracking-widest flex items-center gap-2">
               <Info className="w-3.5 h-3.5" /> GLASS BOX AI RATIONALE
             </h5>
-            <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-gray-800 text-gray-400 border border-gray-700 uppercase tracking-wider">
+            <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-gray-50 text-gray-500 border border-gray-200 uppercase tracking-wider">
               {jurisdiction.primaryFramework}
             </span>
           </div>
@@ -153,29 +144,29 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
             <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
               AI Rec:
             </span>
-            <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/30 uppercase tracking-wider">
+            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/30 uppercase tracking-wider">
               {recommendedAction}
             </span>
           </div>
         </div>
 
-        <p className="text-sm text-gray-300 leading-relaxed font-sans">
+        <p className="text-sm text-gray-600 leading-relaxed font-sans">
           {rationale}
         </p>
 
         {overrideAction && (
           <div className="mt-5 p-3.5 bg-amber-500/20 border border-amber-500/30 rounded-lg space-y-2">
-            <div className="flex items-center gap-2 text-amber-400">
+            <div className="flex items-center gap-2 text-amber-700">
               <AlertTriangle className="w-3.5 h-3.5" />
               <span className="text-[9px] font-bold uppercase tracking-widest">
                 Manual Override Justification
               </span>
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-xs font-bold text-amber-300 uppercase tracking-tight">
+              <span className="text-xs font-bold text-amber-800 uppercase tracking-tight">
                 Action: {overrideAction}
               </span>
-              <p className="text-sm text-amber-200 italic leading-relaxed">
+              <p className="text-sm text-amber-800 italic leading-relaxed">
                 "{overrideRationale || 'No justification provided.'}"
               </p>
             </div>
@@ -186,12 +177,12 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
         <div className="mt-5 space-y-4">
           {/* SECTION 1: WHAT WAS SPENT */}
           {aeroAgentCost !== undefined && (
-            <div className="p-4 bg-gray-800/30 rounded-lg border border-gray-700">
-              <h5 className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <h5 className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-3">
                 AeroAgent Recovery Cost
               </h5>
               {aeroAgentCost <= 0.1 ? (
-                <p className="text-sm text-gray-400 italic">
+                <p className="text-sm text-gray-500 italic">
                   Notification only — minimal operational cost
                 </p>
               ) : (
@@ -200,28 +191,28 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
                   {/* Regulatory Compensation (EU261/APPR/USDOT) */}
                   {financialExposure.eu261.max > 0 && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">
+                      <span className="text-gray-500">
                         Regulatory Compensation ({payload.jurisdiction.primaryFramework})
                       </span>
-                      <span className="font-mono font-bold text-gray-300">
+                      <span className="font-mono font-bold text-gray-600">
                         €{financialExposure.eu261.max.toFixed(2)}
                       </span>
                     </div>
                   )}
                   {/* Duty of Care - Meals */}
-                  {financialExposure.dutyOfCare.local > 0 && financialExposure.dutyOfCare.meals && financialExposure.dutyOfCare.meals.eligible && (
+                  {financialExposure.dutyOfCare.local > 0 && payload.dutyOfCare.meals.eligible && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Duty of Care — Meals</span>
-                      <span className="font-mono font-bold text-gray-300">
-                        €{financialExposure.dutyOfCare.meals.voucherValue.toFixed(2)}
+                      <span className="text-gray-500">Duty of Care — Meals</span>
+                      <span className="font-mono font-bold text-gray-600">
+                        €{payload.dutyOfCare.meals.voucherValue.toFixed(2)}
                       </span>
                     </div>
                   )}
                   {/* Duty of Care - Hotel */}
-                  {financialExposure.dutyOfCare.local > 0 && financialExposure.dutyOfCare.hotel && financialExposure.dutyOfCare.hotel.eligible && (
+                  {financialExposure.dutyOfCare.local > 0 && payload.dutyOfCare.hotel.eligible && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Duty of Care — Hotel</span>
-                      <span className="font-mono font-bold text-gray-300">
+                      <span className="text-gray-500">Duty of Care — Hotel</span>
+                      <span className="font-mono font-bold text-gray-600">
                         €150.00
                       </span>
                     </div>
@@ -229,16 +220,16 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
                   {/* Rebook Cost */}
                   {financialExposure.deterministic.oalRebook > 0 && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Rebook Cost</span>
-                      <span className="font-mono font-bold text-gray-300">
+                      <span className="text-gray-500">Rebook Cost</span>
+                      <span className="font-mono font-bold text-gray-600">
                         €{financialExposure.deterministic.oalRebook.toFixed(2)}
                       </span>
                     </div>
                   )}
                   {/* Total line - must equal sum of items above */}
-                  <div className="flex justify-between text-sm font-bold border-t border-gray-700 pt-2 mt-2">
-                    <span className="text-gray-300">Total</span>
-                    <span className="font-mono text-white">
+                  <div className="flex justify-between text-sm font-bold border-t border-gray-200 pt-2 mt-2">
+                    <span className="text-gray-600">Total</span>
+                    <span className="font-mono text-gray-900">
                       €{aeroAgentCost.toFixed(2)}
                     </span>
                   </div>
@@ -247,75 +238,49 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
             </div>
           )}
 
-          {/* SECTION 2: LEGACY COMPARISON */}
-          {legacyTotal !== undefined && (
-            <div className="p-4 bg-gray-800/30 rounded-lg border border-gray-700">
-              <h5 className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-3">
-                Without AeroAgent (estimated)
-              </h5>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Legacy estimated spend</span>
-                  <span className="font-mono font-bold text-gray-300">
-                    €{legacyTotal.toFixed(2)}
-                  </span>
-                </div>
-                <p className="text-[8px] text-gray-600 italic">
-                  Based on industry standard handling
-                </p>
-                {netSavings !== undefined && (
-                  <div className={`flex justify-between text-sm font-bold border-t border-gray-700 pt-2 mt-2 ${netSavings > 0 ? 'text-green-400' : 'text-amber-400'}`}>
-                    <span>Net Saving</span>
-                    <span className="font-mono">
-                      €{netSavings.toFixed(2)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          {/* MOD 5: SECTION 2 (legacy comparison) removed - focus on AeroAgent costs */}
 
-          {/* SECTION 3: REGULATORY OPTIMIZATION (conditional) */}
+          {/* SECTION 2: REGULATORY OPTIMIZATION (conditional) */}
           {extraordinaryCircumstancesSaving !== undefined && extraordinaryCircumstancesSaving > 0 && (
             <div className="p-4 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
               <div className="flex items-center gap-2 mb-3">
-                <span className="text-emerald-400 text-lg">✓</span>
-                <h5 className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest">
+                <span className="text-emerald-700 text-lg">✓</span>
+                <h5 className="text-[9px] font-bold text-emerald-700 uppercase tracking-widest">
                   Regulatory Optimisation
                 </h5>
               </div>
-              <p className="text-sm text-emerald-300 mb-3">
+              <p className="text-sm text-emerald-700 mb-3">
                 Compensation correctly waived under EU261 Article 5(3)
               </p>
-              <div className="flex justify-between items-center text-sm font-bold text-emerald-300">
+              <div className="flex justify-between items-center text-sm font-bold text-emerald-700">
                 <span>Amount Preserved</span>
                 <span className="font-mono">€{extraordinaryCircumstancesSaving.toFixed(2)}</span>
               </div>
             </div>
           )}
 
-          {/* SECTION 4: CHURN RISK */}
+          {/* SECTION 3: CHURN RISK */}
           {churnPropensity !== undefined && clv !== undefined && (
-            <div className="p-4 bg-gray-800/30 rounded-lg border border-gray-700">
-              <h5 className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <h5 className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-3">
                 Passenger Retention Risk
               </h5>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Churn Propensity</span>
-                  <span className="font-mono font-bold text-gray-300">
+                  <span className="text-gray-500">Churn Propensity</span>
+                  <span className="font-mono font-bold text-gray-600">
                     {(churnPropensity * 100).toFixed(1)}%
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Customer Lifetime Value</span>
-                  <span className="font-mono font-bold text-gray-300">
+                  <span className="text-gray-500">Customer Lifetime Value</span>
+                  <span className="font-mono font-bold text-gray-600">
                     €{clv.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Expected Churn Cost</span>
-                  <span className="font-mono font-bold text-gray-300">
+                  <span className="text-gray-500">Expected Churn Cost</span>
+                  <span className="font-mono font-bold text-gray-600">
                     €{(clv * churnPropensity).toFixed(2)}
                   </span>
                 </div>
@@ -326,8 +291,8 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
             </div>
           )}
 
-          {/* SECTION 5: METHODOLOGY NOTE */}
-          <div className="p-3 bg-gray-900/50 rounded-lg border border-gray-700">
+          {/* SECTION 4: METHODOLOGY NOTE */}
+          <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
             <div className="flex items-center gap-2 mb-2">
               <Info className="w-3 h-3 text-gray-500" />
               <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">
@@ -343,7 +308,7 @@ export const RationalePanel: React.FC<RationalePanelProps> = ({
 
       {/* Right sidebar - keep existing expense breakdown if needed */}
       {false && (
-      <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700 shadow-sm h-fit">
+      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-sm h-fit">
         <div className="mb-3">
           <h5 className="text-[9px] font-bold font-display text-gray-500 uppercase tracking-widest">
             Additional Detail

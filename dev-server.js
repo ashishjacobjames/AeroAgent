@@ -80,7 +80,57 @@ app.post('/api/claude', async (req, res) => {
   "agentTalkingPoints": ["point1", "point2"],
   "recoveryOptions": ["option1", "option2"]
 }`,
-      'passenger-chat': `You are a warm, empathetic airline assistant. You speak as the airline in first person plural (we, us, our). You are given a task. Follow it precisely. Respond with ONLY the message text. No JSON. No explanation. Just the message.`,
+      'passenger-chat': `You are a professional airline disruption assistant speaking directly to a disrupted passenger via chat.
+
+YOUR OBJECTIVE:
+Understand the passenger's situation well enough that a gate agent can help them without asking them to repeat themselves.
+
+You do this through gentle, open conversation.
+You are NOT here to solve their problem. You are here to understand it.
+
+HOW TO CONVERSE:
+- Be warm and professional — not dramatic
+- Speak as the airline using 'we' not 'I'
+- Ask ONE open, gentle question per turn
+- Ask broad questions about what matters to them — not specific personal details
+  GOOD: "What matters most to you right now?"
+  GOOD: "Is there something specific we can help you with today?"
+  GOOD: "How can we best support you?"
+  BAD: "What time is your meeting?"
+  BAD: "Which flight are you connecting to?"
+  BAD: "What is your medical condition?"
+- Max 2-3 sentences per response
+- If passenger is vague or unresponsive, acknowledge warmly and ask once more
+- If passenger is vague twice in a row, set escalationReady: true
+
+ESCALATE IMMEDIATELY (set escalationReady: true without asking further questions) when:
+- You have understood their core concern
+- Passenger mentions: meeting, medical, emergency, funeral, connection, agent, manager, or asks for human help
+- Passenger has been vague/unresponsive twice
+- Passenger says yes/ok/sure to anything
+
+NEVER:
+- Offer solutions, options, or alternatives
+- Name any flight, airline, or route
+- Say "let me check" or "I can check"
+- Make any promise or imply any action
+- Ask for specific personal details
+
+When escalating set escalationReady: true and populate gatheredContext fully.
+
+Respond in JSON only. No markdown.
+{
+  "message": "string",
+  "escalationReady": boolean,
+  "vagueResponseCount": number,
+  "gatheredContext": {
+    "passengerConcern": "string",
+    "emotionalState": "Calm"|"Anxious"|"Frustrated"|"Angry"|"Distressed",
+    "urgencyFlag": boolean,
+    "cooperationLevel": "cooperative"|"vague"|"refused",
+    "keyDetails": ["string"]
+  }
+}`,
       'whatsapp-message': `Generate a WhatsApp message. Return ONLY valid JSON, no markdown, no code blocks, no explanation:
 {
   "message": "string - personalized WhatsApp message for passenger",
@@ -115,37 +165,30 @@ app.post('/api/claude', async (req, res) => {
     const systemPrompt = systemPrompts[useCase] || systemPrompts['gate-agent'];
     let userMessage;
     if (useCase === 'passenger-chat') {
-      const { message, task, passengerContext = {} } = payload;
-      const { firstName, destination, delayMinutes } = passengerContext;
+      const { message, passengerContext = {}, conversationHistory = [] } = payload;
+      const { firstName, destination, delayMinutes, disruptionType } = passengerContext;
 
-      if (task === 'A') {
-        // Task A: Write escalation closing message
-        userMessage = `Passenger name: ${firstName}
-Their message: "${message}"
+      // Build conversation history as plain text summary
+      const historyText = conversationHistory.length > 0
+        ? conversationHistory
+            .map((m) =>
+              m.role === 'user' ? `Passenger: ${m.content}` : `AeroAgent: ${m.content}`
+            )
+            .join('\n\n')
+        : '';
 
-Write ONE warm, empathetic message that:
-1. Acknowledges what they said in one sentence
-2. Tells them a gate agent is on their way and has everything they need
-3. Asks them to stay on the chat
+      userMessage = `Passenger: ${firstName}
+Flight: ${delayMinutes} min disruption to ${destination}
+Type: ${disruptionType}
 
-Use "we" not "I". Max 3 sentences.
-Do not ask any questions. Do not offer options.
-Do not mention flights or airlines.`;
-      } else {
-        // Task B: Write first exchange message with one gentle question
-        userMessage = `Passenger name: ${firstName}
-Their message: "${message}"
-Flight disruption: ${delayMinutes} min delay to ${destination}
+Conversation so far:
+${historyText}
 
-Write ONE warm, empathetic message that:
-1. Acknowledges their frustration or concern
-2. Asks ONE gentle question to understand what matters most to them right now
+Latest message: "${message}"
 
-Use "we" not "I". Max 2 sentences.
-Do not offer options or alternatives.
-Do not mention flights or airlines.
-Do not say "let me check" or "I can check".`;
-      }
+Continue the conversation. Your goal is to understand their situation.
+Remember: ask broad questions only. Never ask specific personal details.
+Never offer solutions.`;
     } else {
       userMessage = `Passenger: ${JSON.stringify(payload.passenger || {}, null, 2)}\n\nContext: ${JSON.stringify(payload, null, 2)}`;
     }
@@ -185,33 +228,24 @@ Do not say "let me check" or "I can check".`;
     // Trim whitespace
     responseText = responseText.trim();
 
+    // Strip markdown code blocks if present
+    responseText = responseText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+
+    // Try to extract JSON from the response (sometimes Claude adds extra text)
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      responseText = jsonMatch[0];
+    }
+
     let parsedResponse;
-    if (useCase === 'passenger-chat') {
-      // passenger-chat returns plain text message, no JSON parsing
-      console.log(`[Dev Server] passenger-chat: plain text response`);
-      parsedResponse = {
-        message: responseText
-      };
-    } else {
-      // All other useCases return JSON
-      // Strip markdown code blocks if present
-      responseText = responseText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-
-      // Try to extract JSON from the response (sometimes Claude adds extra text)
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        responseText = jsonMatch[0];
-      }
-
-      try {
-        parsedResponse = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('Failed to parse Claude response as JSON:', parseError.message);
-        console.error('Raw response length:', data.content[0].text.length);
-        console.error('Cleaned response length:', responseText.length);
-        console.error('First 500 chars:', responseText.substring(0, 500));
-        return res.status(500).json({ error: 'Invalid JSON from Claude', details: parseError.message });
-      }
+    try {
+      parsedResponse = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse Claude response as JSON:', parseError.message);
+      console.error('Raw response length:', data.content[0].text.length);
+      console.error('Cleaned response length:', responseText.length);
+      console.error('First 500 chars:', responseText.substring(0, 500));
+      return res.status(500).json({ error: 'Invalid JSON from Claude', details: parseError.message });
     }
 
     console.log(`[${new Date().toISOString()}] Claude API success | useCase: ${useCase} | PNR: ${payload.passenger?.pnr}`);

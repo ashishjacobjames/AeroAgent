@@ -29,7 +29,7 @@ import {
   Pie,
   Tooltip,
 } from 'recharts';
-import { Passenger, ActionType, AnalysisResult, RecoveryOption } from './types';
+import { Passenger, ActionType, AnalysisResult, RecoveryOption, WhatsAppMessage } from './types';
 
 // ── Local composite types ─────────────────────────────────────────────────────
 // Passenger enriched with analysis cache entry and optional group-aggregation
@@ -45,7 +45,7 @@ type EnrichedPassenger = Passenger & {
 type PersonaId = 'CFO' | 'GateAgent' | 'Passenger';
 
 import { generateSeedData } from './seed';
-import { computeEngineAI } from './engine';
+import { computeEngineAI, generateWhatsAppMessage } from './engine';
 import {
   MEAL_VOUCHER_RATE,
   HOTEL_RATE_PER_NIGHT,
@@ -1452,13 +1452,16 @@ const GateAgentTriage = ({ passengers, onUpdatePax, analysisCache, setAnalysisCa
 
   return (
     <div className="space-y-6">
-      {/* Demo Info Banner */}
+      {/* Demo Info Banner — Hidden for cleaner layout */}
+      {false && (
       <div className="bg-indigo-600/10 border border-indigo-500/30 rounded-lg p-3 flex items-start gap-3 text-sm text-indigo-700">
         <span className="text-lg">✦</span>
         <p>Select a passenger, then click <strong>Analyse with AI</strong> to trigger a live Claude analysis</p>
       </div>
+      )}
 
-      {/* Summary line */}
+      {/* Summary line — Removed for cleaner layout */}
+      {false && (
       <div className="flex items-center gap-2 px-1">
         <span className="text-sm font-bold text-gray-900">
           {kpis.pending} case{kpis.pending !== 1 ? 's' : ''} require your attention
@@ -1468,8 +1471,10 @@ const GateAgentTriage = ({ passengers, onUpdatePax, analysisCache, setAnalysisCa
           {kpis.auto} auto-resolved without intervention
         </span>
       </div>
+      )}
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-3 rounded-xl border border-gray-200 shadow-sm hover:border-gray-200 transition-all">
+      {/* Flight Triage Control Header — Integrated with KPI Cards */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-1">
         <div>
           <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
             <Plane className="w-4.5 h-4.5 text-indigo-600" />
@@ -1498,53 +1503,52 @@ const GateAgentTriage = ({ passengers, onUpdatePax, analysisCache, setAnalysisCa
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
-        <KPICard
-          label="AI Resolved"
-          value={kpis.auto.toString()}
-          icon={CheckCircle2}
-          color="bg-emerald-600"
-          subtitle="Resolved automatically · No agent needed"
+      {/* KPI Cards Grid — Matching CFO Dashboard Row 2 style */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+
+        {/* Card 1 — AI Resolved */}
+        <button
           onClick={() => setActiveFilter('auto')}
-          className={activeFilter === 'auto' ? "ring-2 ring-indigo-500 ring-offset-2" : ""}
-        />
-        <KPICard
-          label="Pending"
-          value={kpis.pending.toString()}
-          icon={Clock}
-          color="bg-indigo-600"
-          subtitle="Awaiting agent action"
+          className={`bg-white border border-gray-200 rounded-xl p-4 text-left transition-all hover:border-indigo-400 ${activeFilter === 'auto' ? "ring-2 ring-indigo-500 ring-offset-2" : ""}`}
+        >
+          <CheckCircle2 className="text-gray-400" style={{ width: 18, height: 18 }} />
+          <div className="text-[24px] font-medium text-gray-900 leading-none mt-2">{kpis.auto}</div>
+          <div className="text-[13px] font-medium text-gray-600 mt-1">AI Resolved</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">Resolved automatically · No agent needed</div>
+        </button>
+
+        {/* Card 2 — Pending */}
+        <button
           onClick={() => setActiveFilter('pending')}
-          className={activeFilter === 'pending' ? "ring-2 ring-indigo-500 ring-offset-2" : ""}
-        />
-        <KPICard
-          label="High-Risk"
-          value={kpis.highRisk.toString()}
-          icon={AlertTriangle}
-          color="bg-warning-crimson"
-          subtitle="Special Handling"
+          className={`bg-white border border-gray-200 rounded-xl p-4 text-left transition-all hover:border-indigo-400 ${activeFilter === 'pending' ? "ring-2 ring-indigo-500 ring-offset-2" : ""}`}
+        >
+          <Clock className="text-gray-400" style={{ width: 18, height: 18 }} />
+          <div className="text-[24px] font-medium text-gray-900 leading-none mt-2">{kpis.pending}</div>
+          <div className="text-[13px] font-medium text-gray-600 mt-1">Pending</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">Awaiting agent action</div>
+        </button>
+
+        {/* Card 3 — High-Risk */}
+        <button
           onClick={() => setActiveFilter('priority')}
-          className={activeFilter === 'priority' ? "ring-2 ring-indigo-500 ring-offset-2" : ""}
-        />
-        <div className="bg-white rounded-xl p-3.5 border border-gray-200 shadow-sm flex flex-col justify-between h-full group hover:border-gray-200 transition-all duration-200 min-h-[88px] -translate-y-0.5 hover:-translate-y-1">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Pax Responses</span>
-          </div>
-          <div className="grid grid-cols-3 gap-2 mt-1">
-            <div className="text-center">
-              <p className="text-[15px] font-bold text-emerald-700 tabular-nums leading-none">{kpis.accepted}</p>
-              <p className="text-[8px] text-gray-500 uppercase font-bold tracking-wider mt-1">Accepted</p>
-            </div>
-            <div className="text-center border-l border-gray-200">
-              <p className="text-[15px] font-bold text-amber-700 tabular-nums leading-none">{kpis.escalated}</p>
-              <p className="text-[8px] text-gray-500 uppercase font-bold tracking-wider mt-1">Escalated</p>
-            </div>
-            <div className="text-center border-l border-gray-200">
-              <p className="text-[15px] font-bold text-gray-900 tabular-nums leading-none">{kpis.noResponse}</p>
-              <p className="text-[8px] text-gray-500 uppercase font-bold tracking-wider mt-1">Pending</p>
-            </div>
-          </div>
-        </div>
+          className={`bg-white border border-gray-200 rounded-xl p-4 text-left transition-all hover:border-indigo-400 ${activeFilter === 'priority' ? "ring-2 ring-indigo-500 ring-offset-2" : ""}`}
+        >
+          <AlertTriangle className="text-gray-400" style={{ width: 18, height: 18 }} />
+          <div className="text-[24px] font-medium text-gray-900 leading-none mt-2">{kpis.highRisk}</div>
+          <div className="text-[13px] font-medium text-gray-600 mt-1">High-Risk</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">Special handling required</div>
+        </button>
+
+        {/* Card 4 — Escalated */}
+        <button
+          onClick={() => setActiveFilter('urgent')}
+          className={`bg-white border border-gray-200 rounded-xl p-4 text-left transition-all hover:border-indigo-400 ${activeFilter === 'urgent' ? "ring-2 ring-indigo-500 ring-offset-2" : ""}`}
+        >
+          <AlertTriangle className="text-gray-400" style={{ width: 18, height: 18 }} />
+          <div className="text-[24px] font-medium text-gray-900 leading-none mt-2">{kpis.escalated}</div>
+          <div className="text-[13px] font-medium text-gray-600 mt-1">Escalated</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">Require immediate attention</div>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -1718,8 +1722,8 @@ const GateAgentTriage = ({ passengers, onUpdatePax, analysisCache, setAnalysisCa
                   </motion.div>
                 )}
 
-                {/* Escalation Card — Passenger Chat escalation (FIX 3) */}
-                {selectedPax?.isEscalated && selectedPax?.handoffBriefing?.keyDetails !== undefined && (
+                {/* Escalation Card — Passenger Chat escalation (FIX 2) */}
+                {selectedPax?.isEscalated && selectedPax?.handoffBriefing !== undefined && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1799,6 +1803,32 @@ const GateAgentTriage = ({ passengers, onUpdatePax, analysisCache, setAnalysisCa
                         <div>
                           <p className="text-[10px] font-bold text-rose-700 uppercase tracking-wider mb-1">Preferred Resolution</p>
                           <p className="text-sm text-gray-900">{selectedPax.handoffBriefing.preferredResolution}</p>
+                        </div>
+                      )}
+
+                      {/* FIX 1: Conversation Summary */}
+                      {(selectedPax.handoffBriefing.conversationSummary || (selectedPax.handoffBriefing.keyDetails?.length ?? 0) > 0) && (
+                        <div className="pt-2 border-t border-rose-500/20">
+                          <p className="text-[10px] font-bold text-rose-700 uppercase tracking-wider mb-2">Conversation Summary</p>
+                          {selectedPax.handoffBriefing.conversationSummary ? (
+                            <p className="text-sm text-gray-900 leading-relaxed">{selectedPax.handoffBriefing.conversationSummary}</p>
+                          ) : (
+                            <ul className="space-y-1">
+                              {(selectedPax.handoffBriefing.keyDetails ?? []).map((detail, i) => (
+                                <li key={i} className="flex items-start gap-2 text-sm text-gray-900">
+                                  <span className="text-rose-700 mt-0.5">•</span> {detail}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+
+                      {/* FIX 1: Suggested Opening */}
+                      {selectedPax.handoffBriefing.suggestedOpeningLine && (
+                        <div className="pt-2 border-t border-rose-500/20">
+                          <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider mb-2">Suggested Opening</p>
+                          <p className="text-sm text-indigo-900 italic leading-relaxed">"{selectedPax.handoffBriefing.suggestedOpeningLine}"</p>
                         </div>
                       )}
                     </div>
@@ -2400,6 +2430,9 @@ const PassengerExperience = ({
 }) => {
   const [selectedPax, setSelectedPax] = useState<Passenger | null>(null);
   const [templateMsg, setTemplateMsg] = useState<PassengerMessage | null>(null);
+  const [whatsappMessage, setWhatsappMessage] = useState<WhatsAppMessage | null>(null);
+  const [messageLoading, setMessageLoading] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
   const [phase, setPhase] = useState<ChatPhase>('template');
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -2413,12 +2446,43 @@ const PassengerExperience = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
+  // ── Generate WhatsApp message when passenger selected ─────────────────────
+  useEffect(() => {
+    if (!selectedPax) {
+      setWhatsappMessage(null);
+      setMessageError(null);
+      return;
+    }
+
+    const generateMessage = async () => {
+      setMessageLoading(true);
+      setMessageError(null);
+      try {
+        const result = analysisCache[selectedPax.uid] ?? {};
+        const message = await generateWhatsAppMessage(selectedPax, result);
+        setWhatsappMessage(message);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Failed to generate message';
+        console.error('WhatsApp message generation failed:', errorMsg);
+        setMessageError(errorMsg);
+        setWhatsappMessage(null);
+      } finally {
+        setMessageLoading(false);
+      }
+    };
+
+    generateMessage();
+  }, [selectedPax]);
+
   // ── Passenger selection ───────────────────────────────────────────────────
   const selectPax = (pax: Passenger) => {
     const result = analysisCache[pax.uid] ?? {};
     const msg = getPassengerMessage(pax, result);
     setSelectedPax(pax);
     setTemplateMsg(msg);
+    setWhatsappMessage(null);
+    setMessageLoading(false);
+    setMessageError(null);
     setPhase('template');
     setMessages([]);
     setInputValue('');
@@ -2451,8 +2515,7 @@ const PassengerExperience = ({
   const handleNeedHelp = () => {
     if (!selectedPax) return;
     const firstName = getFirstName(selectedPax.name);
-    const destination = selectedPax.destination ?? 'your destination';
-    const opener = `Hi ${firstName} — I can see your flight to ${destination} has been disrupted and I want to make sure you get the right support. What's on your mind right now?`;
+    const opener = `We're sorry about the disruption to your flight, ${firstName}. We're here to support you. Please tell us what's on your mind.`;
     setMessages([{
       role: 'assistant',
       content: opener,
@@ -2473,27 +2536,66 @@ const PassengerExperience = ({
     setMessages(nextHistory);
     setIsTyping(true);
 
-    // ── Client-side escalation signal detection ──────────────────────────────
-    const ESCALATION_SIGNALS = [
-      'meeting', 'board meeting', 'appointment',
-      'interview', 'presentation', 'conference',
-      'medical', 'surgery', 'hospital', 'doctor',
-      'medication', 'emergency', 'urgent',
-      'funeral', 'wedding', 'birth',
-      'connection', 'connecting flight',
+    // ── Check for immediate escalation signals (on every message) ────────────
+    const IMMEDIATE_SIGNALS = [
+      'medical', 'appointment', 'doctor',
+      'hospital', 'surgery', 'urgent',
+      'emergency', 'meeting', 'interview',
+      'funeral', 'wedding', 'connection',
       'agent', 'manager', 'supervisor', 'human',
-      'help', 'support', 'options', 'alternative',
-      'flight', 'rebook', 'refund', 'compensation',
-      'yes', 'ok', 'okay', 'sure', 'please'
+      'lawyer', 'legal', 'complaint'
     ];
 
-    const hasEscalationSignal = ESCALATION_SIGNALS.some(signal =>
+    const hasImmediateSignal = IMMEDIATE_SIGNALS.some(signal =>
       userText.toLowerCase().includes(signal)
     );
 
     const passengerMessageCount = nextHistory.filter(m => m.role === 'user').length;
-    const isSecondMessage = passengerMessageCount >= 2;
-    const useTaskA = hasEscalationSignal || isSecondMessage;
+
+    // If immediate signal detected, escalate without calling Claude
+    if (hasImmediateSignal) {
+      const now = new Date().toISOString();
+      const closingMessage = `Thank you ${getFirstName(selectedPax.name)} — we completely understand your situation. A gate agent will join this conversation shortly and will help you resolve this at the earliest. Please stay on this chat.`;
+      setMessages([...nextHistory, {
+        role: 'assistant',
+        content: closingMessage,
+        timestamp: now,
+      }]);
+
+      onUpdatePax(selectedPax.uid, {
+        isEscalated: true,
+        status: 'escalated',
+        escalationReason: 'Immediate escalation signal detected',
+        escalatedAt: now,
+        portalOnly: false,
+        handoffBriefing: {
+          summary: `Passenger escalated immediately. Message: "${userText}"`,
+          passengerConcern: userText,
+          emotionalState: 'Distressed',
+          urgencyLevel: 'High',
+          whatWasArranged: [],
+          suggestedOpeningLine: `I can see this is urgent — let me help you right away.`,
+          sensitiveIssues: [],
+          recommendedAction: 'Assist passenger with priority.',
+          estimatedResolutionTime: '10 mins',
+          generatedAt: now,
+          passengerPnr: selectedPax.pnr,
+          conversationLength: 1,
+          keyDetails: [userText],
+          urgencyFlag: true,
+          preferredResolution: 'Immediate agent assistance',
+          conversationSummary: userText,
+          stressSignals: [],
+          distressLevel: 'High',
+        },
+      }, true);
+      setPhase('escalated');
+      setIsTyping(false);
+      return;
+    }
+
+    // Build conversation history for Claude (exclude static opener)
+    const claudeHistory = nextHistory.filter(m => m.role === 'user' || (m.role === 'assistant' && m.isClaudeGenerated === true));
 
     try {
       const response = await fetch('/api/claude', {
@@ -2503,13 +2605,13 @@ const PassengerExperience = ({
           useCase: 'passenger-chat',
           payload: {
             message: userText,
-            task: useTaskA ? 'A' : 'B',
             passengerContext: {
               firstName: getFirstName(selectedPax.name),
               destination: selectedPax.destination,
               delayMinutes: selectedPax.delayMinutes,
               disruptionType: selectedPax.disruptionType,
             },
+            conversationHistory: claudeHistory.map(m => ({ role: m.role, content: m.content })),
           },
         }),
       });
@@ -2525,24 +2627,43 @@ const PassengerExperience = ({
       const finalHistory = [...nextHistory, assistantMsg];
       setMessages(finalHistory);
 
-      // React decides escalation: Task A or second message always escalates
-      const shouldEscalate = useTaskA;
+      // React enforces hard ceiling: 3 messages OR Claude escalation ready
+      const shouldEscalate = data.escalationReady === true || passengerMessageCount >= 3;
 
       if (shouldEscalate) {
         const now = new Date().toISOString();
+        const firstName = getFirstName(selectedPax.name);
         const passengerMessages = finalHistory.filter(m => m.role === 'user');
-        const passengerConcern = passengerMessages.map(m => m.content).join(' | ');
+        const conversationSummary = passengerMessages.map(m => m.content).join(' | ');
+
+        // FIX 3: Robust fallback for gatheredContext from Claude
+        const gatheredCtx = data.gatheredContext ?? {
+          passengerConcern: conversationSummary || userText,
+          emotionalState: 'Distressed' as const,
+          urgencyFlag: true,
+          cooperationLevel: 'cooperative' as const,
+          keyDetails: [userText]
+        };
+
+        // Show static closing message
+        const closingMessage = `Thank you ${firstName} — we completely understand your situation. A gate agent will join this conversation shortly and will help you resolve this at the earliest. Please stay on this chat.`;
+        setMessages([...finalHistory, {
+          role: 'assistant',
+          content: closingMessage,
+          timestamp: now,
+        }]);
 
         onUpdatePax(selectedPax.uid, {
           isEscalated: true,
           status: 'escalated',
-          escalationReason: hasEscalationSignal ? 'Escalation signal detected' : 'Conversation limit reached',
+          escalationReason: data.escalationReady ? 'Claude escalation' : 'Message limit reached (3 messages)',
           escalatedAt: now,
+          portalOnly: false,
           handoffBriefing: {
-            summary: `Passenger escalated from chat. Messages: ${passengerConcern}`,
-            passengerConcern: passengerConcern,
-            emotionalState: 'Distressed',
-            urgencyLevel: 'High',
+            summary: `Passenger escalated from chat after ${passengerMessages.length} message${passengerMessages.length !== 1 ? 's' : ''}.`,
+            passengerConcern: gatheredCtx.passengerConcern || conversationSummary,
+            emotionalState: gatheredCtx.emotionalState || 'Distressed',
+            urgencyLevel: gatheredCtx.urgencyFlag ? 'High' : 'Medium',
             whatWasArranged: [],
             suggestedOpeningLine: `I can see you need help — let me look into this for you right away.`,
             sensitiveIssues: [],
@@ -2551,12 +2672,12 @@ const PassengerExperience = ({
             generatedAt: now,
             passengerPnr: selectedPax.pnr,
             conversationLength: passengerMessages.length,
-            keyDetails: [userText],
-            urgencyFlag: true,
-            preferredResolution: 'Escalate to gate agent',
-            conversationSummary: passengerConcern,
+            keyDetails: gatheredCtx.keyDetails || [userText],
+            urgencyFlag: gatheredCtx.urgencyFlag ?? true,
+            preferredResolution: 'Agent assistance',
+            conversationSummary: conversationSummary,
             stressSignals: [],
-            distressLevel: 'High',
+            distressLevel: gatheredCtx.emotionalState === 'Calm' ? 'Medium' : 'High',
           },
         }, true);
         setPhase('escalated');
@@ -2742,8 +2863,71 @@ const PassengerExperience = ({
                 ✦ AeroAgent
               </p>
 
-              {/* ── Template message ────────────────────────────────────── */}
-              {phase === 'template' && templateMsg && (
+              {/* ── Loading state ──────────────────────────────────────── */}
+              {phase === 'template' && messageLoading && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col items-start gap-2"
+                >
+                  <div
+                    className="max-w-[75%] rounded-tr-2xl rounded-br-2xl rounded-bl-2xl px-4 py-3"
+                    style={{ background: '#F1F3F5', border: '1px solid rgba(99,102,241,0.15)' }}
+                  >
+                    <p className="text-[12px] text-gray-600">Initializing conversation.</p>
+                    <div className="flex gap-1 mt-2">
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" />
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* ── WhatsApp message (AI-generated) ────────────────────── */}
+              {phase === 'template' && !messageLoading && whatsappMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col items-start"
+                >
+                  <div
+                    className="max-w-[75%] rounded-tr-2xl rounded-br-2xl rounded-bl-2xl px-4 py-3"
+                    style={{ background: '#F1F3F5', border: '1px solid rgba(99,102,241,0.15)' }}
+                  >
+                    {/* AI badge */}
+                    {whatsappMessage.aiPowered && (
+                      <div className="flex items-center gap-1 mb-2">
+                        <Sparkles className="w-3 h-3 text-indigo-600" />
+                        <span className="text-[9px] font-semibold text-indigo-600">AI Generated</span>
+                      </div>
+                    )}
+
+                    <MsgText text={whatsappMessage.message} />
+
+                    {/* QR attachment card */}
+                    {whatsappMessage.qrCodeRequired && (
+                      <div
+                        className="mt-3 rounded-xl overflow-hidden"
+                        style={{ background: '#F8F9FA', border: '1px solid #E2E8F0' }}
+                      >
+                        <div className="px-3 pt-3 pb-2 flex flex-col items-center">
+                          <div className="w-24 h-24 bg-gray-200 rounded-lg flex items-center justify-center">
+                            <span className="text-[10px] text-gray-500 text-center px-2">QR Code: {whatsappMessage.qrCodeType}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-gray-500 text-right mt-2">
+                      {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ✓✓
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* ── Template message (fallback) ───────────────────────── */}
+              {phase === 'template' && !messageLoading && !whatsappMessage && templateMsg && (
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -2839,30 +3023,59 @@ const PassengerExperience = ({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* ── CTA buttons (template phase, 'none' renders nothing) ──────── */}
-            {phase === 'template' && templateMsg && templateMsg.ctaType !== 'none' && (
+            {/* ── CTA buttons ──────────────────────────────────────────────── */}
+            {phase === 'template' && !messageLoading && (
               <div
                 className="px-5 py-3 space-y-2.5 flex-shrink-0 border-t border-gray-200"
                 style={{ background: '#F8F9FA' }}
               >
-                {templateMsg.ctaType === 'accept-or-help' && (
-                  <button
-                    onClick={handleGotIt}
-                    className="w-full py-3 rounded-full text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.97]"
-                    style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.35)', color: '#047857' }}
-                  >
-                    <span>✓</span>
-                    <span>Accept offer</span>
-                  </button>
+                {/* WhatsApp message buttons */}
+                {whatsappMessage && (
+                  <>
+                    <button
+                      onClick={handleGotIt}
+                      className="w-full py-3 rounded-full text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.97]"
+                      style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.35)', color: '#047857' }}
+                    >
+                      <span>✓</span>
+                      <span>Got it, thank you</span>
+                    </button>
+                    {selectedPax && analysisCache[selectedPax.uid]?.goodwillAction?.talkToAgentOption && (
+                      <button
+                        onClick={handleNeedHelp}
+                        className="w-full py-3 rounded-full text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.97]"
+                        style={{ background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.35)', color: '#4f46e5' }}
+                      >
+                        <span>💬</span>
+                        <span>I need help</span>
+                      </button>
+                    )}
+                  </>
                 )}
-                <button
-                  onClick={handleNeedHelp}
-                  className="w-full py-3 rounded-full text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.97]"
-                  style={{ background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.35)', color: '#4f46e5' }}
-                >
-                  <span>💬</span>
-                  <span>I need help</span>
-                </button>
+
+                {/* Template message buttons */}
+                {!whatsappMessage && templateMsg && templateMsg.ctaType !== 'none' && (
+                  <>
+                    {templateMsg.ctaType === 'accept-or-help' && (
+                      <button
+                        onClick={handleGotIt}
+                        className="w-full py-3 rounded-full text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.97]"
+                        style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.35)', color: '#047857' }}
+                      >
+                        <span>✓</span>
+                        <span>Accept offer</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={handleNeedHelp}
+                      className="w-full py-3 rounded-full text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.97]"
+                      style={{ background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.35)', color: '#4f46e5' }}
+                    >
+                      <span>💬</span>
+                      <span>I need help</span>
+                    </button>
+                  </>
+                )}
               </div>
             )}
 

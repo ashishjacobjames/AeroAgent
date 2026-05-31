@@ -1,11 +1,6 @@
-import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+export { cn } from './lib/utils';
 
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
-export type CabinClass = 'Economy' | 'Premium Economy' | 'Business' | 'F' | 'J';
+export type CabinClass = 'Economy' | 'Premium Economy' | 'Business' | 'First' | 'F' | 'J';
 export type LoyaltyTier = 'Basic' | 'Silver' | 'Gold' | 'Platinum' | 'Platinum Lumo' | 'oneworld Emerald' | 'Standard' | 'None';
 export type HaulType = 'Short' | 'Medium' | 'Long';
 export type TimingType = 'Day' | 'Overnight';
@@ -19,7 +14,9 @@ export type ActionType =
   | 'Original Flight Maintained + Notification Only'
   | 'Original Flight Maintained + Lounge Access Issued'
   | 'Original Flight Maintained + Meal Voucher Issued'
+  | 'Same Metal Recovery'
   | 'Same Metal Recovery + Hotel & Meal Vouchers'
+  | 'Partner Metal Recovery'
   | 'Partner Metal Recovery + Hotel & Meal Vouchers'
   | 'Interline Metal Recovery + Hotel & Meal Vouchers'
   | 'Alternative Flight + Hotel'
@@ -32,10 +29,7 @@ export type ActionType =
   | 'Lounge Access'
   | 'Hotel and Meal Vouchers';
 
-export type PaxStatus = 'pending_triage' | 'pending_validation' | 'resolved' | 'auto_processed';
-export type PriorityTier = 1 | 2 | 3 | 4;
-export type DistressLevel = 'Critical' | 'High' | 'Medium' | 'Low';
-export type RebookWindow = 'SAME_DAY' | 'NEXT_DAY' | 'BEYOND_24H';
+export type PaxStatus = 'pending_triage' | 'pending_validation' | 'resolved' | 'auto_processed' | 'escalated';
 export type RecoveryPrimaryAction =
   | 'NOTIFICATION_ONLY'
   | 'MEAL_VOUCHER'
@@ -61,54 +55,6 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
-}
-
-export interface PriorityAssessment {
-  isPriority: boolean;
-  priorityTier: PriorityTier;
-  priorityReasons: string[];
-  isUMNR: boolean;
-  distressScore: number;
-  distressLevel: DistressLevel;
-  distressReasons: string[];
-}
-
-export interface RegulatoryAssessment {
-  jurisdiction: string;
-  isControllableCause: boolean;
-  cashCompensationOwed: boolean;
-  cashCompensationAmount: number;
-  cashCompensationCurrency: 'EUR' | 'USD' | 'CAD';
-  dutyOfCareOwed: boolean;
-  dutyOfCareMeals: boolean;
-  dutyOfCareHotel: boolean;
-  dutyOfCareTransport: boolean;
-  reroutingOwed: boolean;
-  refundOwed: boolean;
-  regulatoryNote: string;
-}
-
-export interface GoodwillAction {
-  notificationRequired: boolean;
-  mealVoucherOffered: boolean;
-  mealVoucherValue: number;
-  loungeAccessOffered: boolean;
-  personalOutreachRequired: boolean;
-  whatsappMessageType: WhatsappMessageType;
-  talkToAgentOption: boolean;
-}
-
-export interface RecoveryDecision {
-  primaryAction: RecoveryPrimaryAction;
-  rebookEligible: boolean;
-  rebookCarrierOrder: ('SAME_METAL' | 'PARTNER' | 'INTERLINE')[];
-  hotelRequired: boolean;
-  mealsRequired: boolean;
-  loungeRequired: boolean;
-  acceptableRebookWindow: RebookWindow;
-  offerRefundAlternative: boolean;
-  requiresAgentIntervention: boolean;
-  agentInterventionReason?: string;
 }
 
 export interface Passenger {
@@ -168,6 +114,7 @@ export interface Passenger {
   messages?: ChatMessage[];
   queuePosition?: number;
   analysis?: AnalysisResult;
+  portalOnly?: boolean;
 }
 
 export interface CostBreakdown {
@@ -182,6 +129,20 @@ export interface CostBreakdown {
   loungeCost?: number;
   compensationCost?: number;
   extraordinaryCircumstancesSaving?: number;
+}
+
+// MOD 3: Recovery Option for multiple recovery alternatives
+export interface RecoveryOption {
+  id: string; // e.g., 'option-1', 'option-2', 'option-3'
+  title: string; // e.g., 'Next Available Flight', 'Premium Rebook', 'Refund'
+  description: string; // One sentence summary
+  primaryAction: ActionType;
+  costToAeroAgent: number;
+  passengerValue: string; // e.g., "€250 voucher + Lounge access"
+  timeline: string; // e.g., "Departing 3 hours", "By morning"
+  regulatoryBasis: string; // e.g., "EU261 Article 7", "Goodwill"
+  suitabilityReason: string; // Why this option fits this passenger
+  flaggedConcerns?: string[]; // Any downsides or risks
 }
 
 export interface AnalysisResult {
@@ -199,6 +160,8 @@ export interface AnalysisResult {
   aeroAgentCost: number;
   netSavings: number;
   rationale: string;
+  distressReason?: string;
+  distressLevel?: string;
   eu261Max: number;
   eu261Likelihood: number;
   eu261EV: number;
@@ -208,9 +171,32 @@ export interface AnalysisResult {
   totalEV: number;
   extraordinaryCircumstancesSaving?: number;
   regulatorySavingsPercent?: number;
-  distressLevel?: string;
   regulatoryBasis?: string;
   liabilityEngine?: DisruptionLiabilityEngine;
+  recoveryDecision?: {
+    primaryAction?: RecoveryPrimaryAction;
+    rebookEligible: boolean;
+    rebookCarrierOrder?: ('SAME_METAL' | 'PARTNER' | 'INTERLINE')[];
+    hotelRequired: boolean;
+    mealsRequired: boolean;
+    loungeRequired: boolean;
+    acceptableRebookWindow?: 'SAME_DAY' | 'NEXT_DAY';
+    offerRefundAlternative: boolean;
+    requiresAgentIntervention: boolean;
+    agentInterventionReason?: string;
+  };
+  goodwillAction?: {
+    notificationRequired?: boolean;
+    mealVoucherOffered?: boolean;
+    mealVoucherValue?: number;
+    loungeAccess?: boolean;
+    loungeAccessOffered?: boolean;
+    personalOutreachRequired?: boolean;
+    whatsappMessageType?: WhatsappMessageType;
+    talkToAgentOption?: boolean;
+    compensation?: number;
+  };
+  cashCompensationAmount?: number;
   aiJustification?: string;
   aiDistressLevel?: 'Critical' | 'High' | 'Medium' | 'Low';
   aiDistressReason?: string;
@@ -220,6 +206,9 @@ export interface AnalysisResult {
   aiFlaggedIssues?: string[];
   aiAgentTalkingPoints?: string[];
   aiPowered?: boolean;
+  aiUnavailable?: boolean;
+  aiPoweredError?: string;
+  recoveryOptions?: RecoveryOption[]; // MOD 3: Multiple recovery alternatives
 }
 
 export interface WhatsAppMessage {
@@ -247,6 +236,13 @@ export interface HandoffBriefing {
   generatedAt: string;
   passengerPnr: string;
   conversationLength: number;
+  // Optional fields from passenger-chat escalation
+  keyDetails?: string[];
+  urgencyFlag?: boolean;
+  preferredResolution?: string;
+  conversationSummary?: string;
+  stressSignals?: string[];
+  distressLevel?: 'Critical' | 'High' | 'Medium' | 'Low';
 }
 
 export interface AuditNarrative {

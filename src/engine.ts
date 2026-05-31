@@ -3,15 +3,43 @@ import {
   AnalysisResult,
   CostBreakdown,
   ActionType,
-  PaxStatus,
-  DisruptionLiabilityEngine,
+  RecoveryOption,
+  RecoveryPrimaryAction,
+  WhatsappMessageType,
   WhatsAppMessage,
   HandoffBriefing,
   AuditNarrative,
-  ChatMessage,
 } from './types';
-import { differenceInHours, parseISO } from 'date-fns';
+import {
+  MEAL_VOUCHER_RATE,
+  OVERNIGHT_THRESHOLD_MINUTES,
+  EU261_SHORT_HAUL_AMOUNT,
+  EU261_MEDIUM_HAUL_AMOUNT,
+  EU261_LONG_HAUL_AMOUNT,
+  EU261_SHORT_MEDIUM_THRESHOLD,
+  EU261_LONG_THRESHOLD,
+  EU261_MEALS_SHORT_THRESHOLD,
+  OAL_COST,
+} from './constants';
 
+// ============================================================================
+// MOD 2: AUTO-PROCESSING LOGIC - MANAGED BY EXCEPTION
+// ============================================================================
+export const shouldAutoProcess = (pax: Passenger): boolean => {
+  // Auto-process ONLY if ALL conditions met:
+  return (
+    pax.disruptionType === 'DELAY' &&
+    (pax.delayMinutes ?? 0) < EU261_SHORT_MEDIUM_THRESHOLD &&
+    // Note: priorityAssessment is computed in engine, so we check during seed/initial state
+    // This will be validated when status is assigned in seed.ts
+    !pax.ssrCode &&
+    !pax.isEscalated
+    // Note: overnight stranding (≥480 min) is already excluded by the
+    // < EU261_SHORT_MEDIUM_THRESHOLD (180 min) guard above.
+  );
+};
+
+// MOD 4: AI-POWERED ANALYSIS - uses computeEngineAI async function (defined below)
 // ============================================================================
 // BUG 4: CHURN PROPENSITY SCALED TO SEVERITY
 // ============================================================================
@@ -35,7 +63,7 @@ function getChurnPropensity(
   } else if (delayMinutes >= 300) {
     // 5h+
     base = 0.20;
-  } else if (delayMinutes >= 180) {
+  } else if (delayMinutes >= EU261_SHORT_MEDIUM_THRESHOLD) {
     // 3h+
     base = 0.12;
   } else if (delayMinutes >= 90) {
@@ -75,19 +103,25 @@ function getChurnPropensity(
 // ============================================================================
 function calculateAeroAgentCost(
   primaryAction: string,
-  ticketValue: number,
-  oalCost: number,
+  _ticketValue: number,
+  _oalCost: number,
   hotelCost: number,
-  mealVoucherOffered: boolean,
+  _mealVoucherOffered: boolean,
   mealVoucherValue: number,
   dutyOfCareHotel: boolean,
   dutyOfCareMeals: boolean
 ): number {
   let totalCost = 0;
 
-  // OAL rebook cost (€450) — ONLY if action is rebook
-  if (primaryAction === 'REBOOK_PARTNER' || primaryAction === 'REBOOK_INTERLINE') {
-    totalCost += 450;
+  // OAL rebook cost (€450) — ONLY if action is a partner/interline rebook
+  if (
+    primaryAction.includes('Partner Metal') ||
+    primaryAction.includes('Interline Metal') ||
+    primaryAction.includes('OAL') ||
+    primaryAction === 'REBOOK_PARTNER' ||
+    primaryAction === 'REBOOK_INTERLINE'
+  ) {
+    totalCost += OAL_COST;
   }
 
   // Hotel cost — ONLY if duty of care hotel is applicable
@@ -96,13 +130,9 @@ function calculateAeroAgentCost(
   }
 
   // Meals (€20) — ONLY if duty of care meals is applicable
+  // Note: mealVoucherOffered === dutyOfCareMeals — only one branch fires to avoid double-charging
   if (dutyOfCareMeals) {
-    totalCost += 20;
-  }
-
-  // Meal voucher (€15) — ONLY if offered
-  if (mealVoucherOffered) {
-    totalCost += mealVoucherValue || 15;
+    totalCost += mealVoucherValue || MEAL_VOUCHER_RATE;
   }
 
   // Lounge (€0) — operational sunk cost, not charged
@@ -166,12 +196,12 @@ function calculateCLV(
 // BUG 6: LEGACY COST TOO LOW FOR SEVERE DISRUPTIONS
 // ============================================================================
 function calculateLegacyCost(
-  primaryAction: string,
+  _primaryAction: string,
   delayMinutes: number,
   disruptionType: string,
   jurisdiction: string,
   cabin: string,
-  loyaltyTier: string,
+  _loyaltyTier: string,
   ticketValue: number,
   isOvernightStranding: boolean
 ): number {
@@ -187,7 +217,7 @@ function calculateLegacyCost(
 
   // Duty of care
   // Legacy over-applies — does not check thresholds correctly
-  if (delayMinutes >= 120) {
+  if (delayMinutes >= EU261_MEALS_SHORT_THRESHOLD) {
     legacyCost += 45;
     // Meals applied too broadly
   }
@@ -205,8 +235,8 @@ function calculateLegacyCost(
   // Legacy always pays €600 max
   // Does not check extraordinary circumstances
   if (jurisdiction === 'EU261' || jurisdiction === 'UK261') {
-    if (delayMinutes >= 180) {
-      legacyCost += 600;
+    if (delayMinutes >= EU261_SHORT_MEDIUM_THRESHOLD) {
+      legacyCost += EU261_LONG_HAUL_AMOUNT;
       // Always maximum — not distance-based
       // Does not check Article 5(3)
     }
@@ -226,7 +256,7 @@ function calculateLegacyCost(
 
   // APPR
   if (jurisdiction === 'APPR_LARGE' || jurisdiction === 'APPR_SMALL') {
-    if (delayMinutes >= 180) {
+    if (delayMinutes >= EU261_SHORT_MEDIUM_THRESHOLD) {
       legacyCost += 700;
       // Legacy pays max APPR amount
     }
@@ -251,681 +281,6 @@ function calculateLegacyCost(
   return legacyCost;
 }
 
-export function computeEngineLocal(
-  pax: Passenger,
-  actionOverride?: ActionType
-): AnalysisResult {
-  const schedArr = parseISO(pax.scheduledArrival);
-  const estArr = parseISO(pax.estimatedArrival);
-  const delayHours = Math.max(0, differenceInHours(estArr, schedArr));
-
-  // ============================================================================
-  // LAYER 1: PRIORITY ASSESSMENT
-  // ============================================================================
-
-  let priorityScore = 0;
-  const priorityReasons: string[] = [];
-
-  // SSR-based priority (40 points max)
-  const isUMNR = pax.ssrCode === 'UMNR';
-  const isMEDA = pax.ssrCode === 'MEDA';
-  const isWCHR = pax.ssrCode === 'WCHR';
-  const isSpecialNeeds = isUMNR || isMEDA || isWCHR || pax.ssrCode === 'BLND' || pax.ssrCode === 'DEAF' || pax.ssrCode === 'WCHC' || pax.ssrCode === 'WCHS' || pax.ssrCode === 'DPNA' || pax.ssrCode === 'MAAS';
-
-  if (isUMNR) {
-    priorityScore += 40;
-    priorityReasons.push('Unaccompanied minor (UMNR)');
-  } else if (isMEDA) {
-    priorityScore += 35;
-    priorityReasons.push('Medical assistance required (MEDA)');
-  } else if (isWCHR) {
-    priorityScore += 30;
-    priorityReasons.push('Wheelchair user with full assistance (WCHR)');
-  } else if (isSpecialNeeds) {
-    priorityScore += 25;
-    priorityReasons.push(`Special needs passenger (${pax.ssrCode})`);
-  }
-
-  // Cabin/Tier-based priority (30 points max)
-  const premiumTiers = ['Platinum', 'Platinum Lumo', 'oneworld Emerald', 'Gold'];
-  const isPremiumTier = premiumTiers.includes(pax.tier);
-  const isPremiumCabin = pax.cabin === 'Business';
-
-  if (pax.cabin === 'Business') {
-    priorityScore += 25;
-    priorityReasons.push('Premium cabin (Business)');
-  } else if (pax.cabin === 'Premium Economy') {
-    priorityScore += 15;
-    priorityReasons.push('Premium Economy cabin');
-  }
-
-  if (pax.tier === 'Platinum Lumo' || pax.tier === 'oneworld Emerald') {
-    priorityScore += 30;
-    priorityReasons.push(`Top loyalty tier (${pax.tier})`);
-  } else if (pax.tier === 'Platinum') {
-    priorityScore += 25;
-    priorityReasons.push('Platinum loyalty tier');
-  } else if (pax.tier === 'Gold') {
-    priorityScore += 15;
-    priorityReasons.push('Gold loyalty tier');
-  } else if (pax.tier === 'Silver') {
-    priorityScore += 8;
-    priorityReasons.push('Silver loyalty tier');
-  }
-
-  // Disruption type/timing-based priority (20 points max)
-  if (pax.disruptionType === 'CANCELLATION') {
-    priorityScore += 20;
-    priorityReasons.push('Flight cancellation');
-  } else if (delayHours >= 12) {
-    priorityScore += 20;
-    priorityReasons.push('Severe delay (≥12h)');
-  } else if (delayHours >= 6) {
-    priorityScore += 12;
-    priorityReasons.push('Major delay (6-12h)');
-  } else if (delayHours >= 3) {
-    priorityScore += 6;
-    priorityReasons.push('Significant delay (3-6h)');
-  }
-
-  if (pax.timing === 'Overnight' && delayHours >= 5) {
-    priorityScore += 15;
-    priorityReasons.push('Overnight disruption with hotel required');
-  }
-
-  // Travel party risk (15 points max)
-  if (pax.partySize >= 4) {
-    priorityScore += 10;
-    priorityReasons.push(`Large travel party (${pax.partySize} pax)`);
-  }
-  if (pax.hasInfant) {
-    priorityScore += 15;
-    priorityReasons.push('Infant on booking');
-  }
-
-  // Connection risk (15 points max)
-  if (pax.hasConnection && pax.connectionBufferMinutes && pax.connectionBufferMinutes < 120) {
-    priorityScore += 15;
-    priorityReasons.push(`Tight connection (${pax.connectionBufferMinutes}m buffer)`);
-  }
-
-  const distressScore = Math.min(200, priorityScore);
-  let distressLevel: 'Critical' | 'High' | 'Medium' | 'Low';
-  if (distressScore >= 120) {
-    distressLevel = 'Critical';
-  } else if (distressScore >= 80) {
-    distressLevel = 'High';
-  } else if (distressScore >= 40) {
-    distressLevel = 'Medium';
-  } else {
-    distressLevel = 'Low';
-  }
-
-  let priorityTier: 1 | 2 | 3 | 4;
-  if (isSpecialNeeds || distressLevel === 'Critical') {
-    priorityTier = 1;
-  } else if (isPremiumCabin || (isPremiumTier && delayHours >= 3)) {
-    priorityTier = 2;
-  } else if (isPremiumTier) {
-    priorityTier = 3;
-  } else {
-    priorityTier = 4;
-  }
-
-  const priorityAssessment = {
-    isPriority: priorityTier <= 2,
-    priorityTier,
-    priorityReasons,
-    isUMNR,
-    distressScore,
-    distressLevel,
-    distressReasons: priorityReasons,
-  };
-
-  // ============================================================================
-  // LAYER 2: REGULATORY ASSESSMENT
-  // ============================================================================
-
-  const isControllableCause =
-    pax.disruptionCause === 'TECHNICAL' ||
-    pax.disruptionCause === 'OPERATIONAL' ||
-    (pax.disruptionReason === 'Crew Scheduling' ||
-      pax.disruptionReason === 'Late Inbound' ||
-      pax.disruptionReason === 'Technical');
-
-  const isExtraordinaryCircumstance =
-    pax.disruptionCause === 'WEATHER' ||
-    pax.disruptionReason === 'Weather' ||
-    pax.disruptionCause === 'ATC' ||
-    pax.disruptionReason === 'ATC' ||
-    pax.disruptionCause === 'SECURITY' ||
-    pax.disruptionReason === 'SECURITY';
-
-  let cashCompensationOwed = false;
-  let cashCompensationAmount = 0;
-  let cashCompensationCurrency: 'EUR' | 'USD' | 'CAD' = 'EUR';
-  let dutyOfCareOwed = false;
-  let dutyOfCareHotel = false;
-  let dutyOfCareMeals = false;
-  let dutyOfCareTransport = false;
-  let reroutingOwed = false;
-  let refundOwed = false;
-  let regulatoryNote = '';
-
-  const jurisdiction = pax.jurisdiction || 'Other';
-
-  if (jurisdiction === 'EU' || jurisdiction === 'EU261') {
-    if (!isExtraordinaryCircumstance && isControllableCause && delayHours >= 3) {
-      cashCompensationOwed = true;
-      const distanceRule = pax.haul === 'Short' ? 250 : pax.haul === 'Medium' ? 500 : 1500;
-      cashCompensationAmount = distanceRule <= 1500 ? 250 : distanceRule <= 3500 ? 400 : 600;
-      regulatoryNote = `EU261: €${cashCompensationAmount} compensation due (non-extraordinary, ${delayHours}h delay)`;
-    }
-    dutyOfCareOwed = true;
-    dutyOfCareHotel = pax.timing === 'Overnight' || (delayHours >= 5 && delayHours < 8);
-    dutyOfCareMeals = delayHours >= 2;
-    dutyOfCareTransport = delayHours >= 5;
-    reroutingOwed = true;
-    refundOwed = pax.disruptionType === 'CANCELLATION' && delayHours >= 2;
-  } else if (jurisdiction === 'UK261') {
-    if (!isExtraordinaryCircumstance && isControllableCause && delayHours >= 3) {
-      cashCompensationOwed = true;
-      const distanceRule = pax.haul === 'Short' ? 250 : pax.haul === 'Medium' ? 500 : 1500;
-      cashCompensationAmount = distanceRule <= 1500 ? 225 : distanceRule <= 3500 ? 360 : 540;
-      cashCompensationCurrency = 'EUR';
-      regulatoryNote = `UK261: €${cashCompensationAmount} compensation due`;
-    }
-    dutyOfCareOwed = true;
-    dutyOfCareHotel = pax.timing === 'Overnight' || (delayHours >= 5 && delayHours < 8);
-    dutyOfCareMeals = delayHours >= 2;
-    dutyOfCareTransport = delayHours >= 5;
-    reroutingOwed = true;
-    refundOwed = pax.disruptionType === 'CANCELLATION' && delayHours >= 2;
-  } else if (jurisdiction === 'USDOT_DOMESTIC') {
-    if (delayHours >= 3) {
-      cashCompensationOwed = true;
-      cashCompensationAmount = Math.min(pax.ticketValue * 0.4, 775);
-      cashCompensationCurrency = 'USD';
-      regulatoryNote = `US DOT Domestic: $${cashCompensationAmount} required (3h+ delay)`;
-    }
-    dutyOfCareOwed = delayHours >= 5;
-    dutyOfCareMeals = delayHours >= 5;
-    dutyOfCareTransport = delayHours >= 5;
-    reroutingOwed = true;
-    refundOwed = pax.disruptionType === 'CANCELLATION';
-  } else if (jurisdiction === 'USDOT_INTERNATIONAL') {
-    if (delayHours >= 4) {
-      cashCompensationOwed = true;
-      cashCompensationAmount = Math.min(pax.ticketValue * 0.5, 1550);
-      cashCompensationCurrency = 'USD';
-      regulatoryNote = `US DOT International: $${cashCompensationAmount} required (4h+ delay)`;
-    }
-    dutyOfCareOwed = delayHours >= 8;
-    dutyOfCareMeals = delayHours >= 8;
-    dutyOfCareTransport = delayHours >= 8;
-    dutyOfCareHotel = pax.timing === 'Overnight' && delayHours >= 5;
-    reroutingOwed = true;
-    refundOwed = pax.disruptionType === 'CANCELLATION';
-  } else if (jurisdiction === 'APPR_LARGE') {
-    if (!isExtraordinaryCircumstance && delayHours >= 3) {
-      cashCompensationOwed = true;
-      cashCompensationAmount = pax.haul === 'Short' ? 200 : 300;
-      regulatoryNote = `APPR Large Carrier: $${cashCompensationAmount} compensation`;
-    }
-    dutyOfCareOwed = delayHours >= 4;
-    dutyOfCareMeals = delayHours >= 3;
-    dutyOfCareHotel = pax.timing === 'Overnight';
-    reroutingOwed = true;
-  } else if (jurisdiction === 'APPR_SMALL') {
-    if (!isExtraordinaryCircumstance && delayHours >= 4) {
-      cashCompensationOwed = true;
-      cashCompensationAmount = pax.haul === 'Short' ? 100 : 150;
-      regulatoryNote = `APPR Small Carrier: $${cashCompensationAmount} compensation`;
-    }
-    dutyOfCareOwed = delayHours >= 5;
-    dutyOfCareMeals = delayHours >= 4;
-    dutyOfCareHotel = pax.timing === 'Overnight';
-    reroutingOwed = true;
-  } else {
-    // Other jurisdictions: goodwill only
-    dutyOfCareOwed = delayHours >= 3;
-    dutyOfCareMeals = delayHours >= 3;
-    dutyOfCareHotel = pax.timing === 'Overnight' && delayHours >= 6;
-    reroutingOwed = delayHours >= 6;
-    regulatoryNote = 'Standard IATA goodwill response';
-  }
-
-  const regulatoryAssessment = {
-    jurisdiction,
-    isControllableCause,
-    cashCompensationOwed,
-    cashCompensationAmount,
-    cashCompensationCurrency,
-    dutyOfCareOwed,
-    dutyOfCareMeals,
-    dutyOfCareHotel,
-    dutyOfCareTransport,
-    reroutingOwed,
-    refundOwed,
-    regulatoryNote,
-  };
-
-  // ============================================================================
-  // LAYER 3: GOODWILL NPS ACTION
-  // ============================================================================
-
-  let notificationRequired = true;
-  let mealVoucherOffered = false;
-  let mealVoucherValue = 0;
-  let loungeAccessOffered = false;
-  let personalOutreachRequired = false;
-  let whatsappMessageType: any = 'NOTIFICATION_ONLY';
-  let talkToAgentOption = false;
-
-  if (delayHours < 1.5) {
-    // Minimal disruption
-    notificationRequired = true;
-    whatsappMessageType = 'NOTIFICATION_ONLY';
-  } else if (delayHours < 3) {
-    // 90-180 minute range
-    if (isPremiumCabin) {
-      loungeAccessOffered = true;
-      whatsappMessageType = 'LOUNGE_ACCESS';
-    } else if (isPremiumTier) {
-      loungeAccessOffered = true;
-      whatsappMessageType = 'LOUNGE_ACCESS';
-    } else {
-      mealVoucherOffered = true;
-      mealVoucherValue = 15;
-      whatsappMessageType = 'MEAL_VOUCHER';
-    }
-  } else if (delayHours < 5) {
-    // 180-300 minute range
-    mealVoucherOffered = true;
-    mealVoucherValue = 25;
-    if (isPremiumCabin || isPremiumTier) {
-      loungeAccessOffered = true;
-    }
-    whatsappMessageType = 'MEAL_VOUCHER';
-    talkToAgentOption = true;
-  } else {
-    // 300+ minute range
-    personalOutreachRequired = true;
-    mealVoucherOffered = true;
-    mealVoucherValue = 30;
-    talkToAgentOption = true;
-    if (isSpecialNeeds || priorityTier <= 2) {
-      whatsappMessageType = 'REBOOK_PENDING';
-    } else {
-      whatsappMessageType = 'HOTEL_ARRANGED';
-    }
-  }
-
-  const goodwillAction = {
-    notificationRequired,
-    mealVoucherOffered,
-    mealVoucherValue,
-    loungeAccessOffered,
-    personalOutreachRequired,
-    whatsappMessageType,
-    talkToAgentOption,
-  };
-
-  // ============================================================================
-  // LAYER 4: RECOVERY ROUTING
-  // ============================================================================
-
-  let primaryAction: any = 'NOTIFICATION_ONLY';
-  let rebookEligible = false;
-  let rebookCarrierOrder: ('SAME_METAL' | 'PARTNER' | 'INTERLINE')[] = [];
-  let hotelRequired = false;
-  let mealsRequired = false;
-  let loungeRequired = false;
-  let acceptableRebookWindow: any = 'SAME_DAY';
-  let offerRefundAlternative = false;
-  let requiresAgentIntervention = false;
-  let agentInterventionReason: string | undefined;
-
-  // Determine rebook eligibility and carrier order
-  if (delayHours >= 3 && pax.disruptionType === 'CANCELLATION') {
-    rebookEligible = true;
-    rebookCarrierOrder = ['SAME_METAL', 'PARTNER', 'INTERLINE'];
-    acceptableRebookWindow = delayHours >= 12 ? 'NEXT_DAY' : 'SAME_DAY';
-    offerRefundAlternative = true;
-    mealsRequired = true;
-    if (pax.timing === 'Overnight') {
-      hotelRequired = true;
-    }
-  } else if (delayHours >= 5) {
-    rebookEligible = true;
-    const inventoryConfidence = pax.inventoryConfidenceScore ?? 0.9;
-    if (inventoryConfidence >= 0.8 && pax.internalSeatAvailable) {
-      rebookCarrierOrder = ['SAME_METAL', 'PARTNER', 'INTERLINE'];
-    } else if (pax.partnerSeatAvailable) {
-      rebookCarrierOrder = ['PARTNER', 'SAME_METAL', 'INTERLINE'];
-    } else {
-      rebookCarrierOrder = ['INTERLINE', 'PARTNER', 'SAME_METAL'];
-    }
-    acceptableRebookWindow = delayHours >= 12 ? 'NEXT_DAY' : 'SAME_DAY';
-    mealsRequired = true;
-    if (pax.timing === 'Overnight') {
-      hotelRequired = true;
-    }
-  } else if (delayHours >= 1.5 && delayHours < 5) {
-    if (isPremiumCabin || isPremiumTier) {
-      loungeRequired = true;
-    } else {
-      mealsRequired = true;
-    }
-  }
-
-  // Determine primary action
-  if (isSpecialNeeds) {
-    requiresAgentIntervention = true;
-    agentInterventionReason = `Special needs passenger (${pax.ssrCode}) requires agent review`;
-    if (rebookEligible) {
-      primaryAction = 'REBOOK_SAME_METAL';
-    } else if (mealsRequired || hotelRequired) {
-      primaryAction = 'MEAL_VOUCHER';
-    } else {
-      primaryAction = 'NOTIFICATION_ONLY';
-    }
-  } else if (rebookEligible) {
-    if (rebookCarrierOrder[0] === 'SAME_METAL') {
-      primaryAction = 'REBOOK_SAME_METAL';
-    } else if (rebookCarrierOrder[0] === 'PARTNER') {
-      primaryAction = 'REBOOK_PARTNER';
-    } else {
-      primaryAction = 'REBOOK_INTERLINE';
-    }
-    if (hotelRequired) {
-      primaryAction = 'REBOOK_AND_HOTEL';
-    }
-    if (pax.cabin === 'Business' && delayHours >= 5) {
-      requiresAgentIntervention = true;
-      agentInterventionReason = 'Premium cabin passenger in severe delay - confirm downgrade consent';
-      pax.downgradeOffered = true;
-      pax.rebookConsentRequired = true;
-    }
-  } else if (loungeRequired) {
-    primaryAction = 'LOUNGE_ACCESS';
-  } else if (mealsRequired) {
-    primaryAction = 'MEAL_VOUCHER';
-  } else {
-    primaryAction = 'NOTIFICATION_ONLY';
-  }
-
-  if (priorityTier === 1 && (rebookEligible || mealsRequired)) {
-    requiresAgentIntervention = true;
-    agentInterventionReason = 'Critical priority passenger requires agent attention';
-  }
-
-  const recoveryDecision = {
-    primaryAction,
-    rebookEligible,
-    rebookCarrierOrder,
-    hotelRequired,
-    mealsRequired,
-    loungeRequired,
-    acceptableRebookWindow,
-    offerRefundAlternative,
-    requiresAgentIntervention,
-    agentInterventionReason,
-  };
-
-  // ============================================================================
-  // COST BREAKDOWN & FINANCIAL EXPOSURE
-  // ============================================================================
-
-  // BUG 1 & 2: Calculate individual cost components explicitly
-  // Regulatory Compensation (EU261/US DOT/APPR)
-  let compensationCost = 0;
-  if (regulatoryAssessment.cashCompensationOwed === true) {
-    compensationCost = regulatoryAssessment.cashCompensationAmount;
-  }
-
-  // Debug log for EU261 compensation
-  console.log('[Cost Debug EU261]', {
-    pnr: pax.pnr,
-    jurisdiction: pax.jurisdiction,
-    cashCompensationOwed: regulatoryAssessment.cashCompensationOwed,
-    cashCompensationAmount: regulatoryAssessment.cashCompensationAmount,
-    compensationCost,
-    isControllableCause: regulatoryAssessment.isControllableCause,
-  });
-
-  // Duty of Care - Meals
-  let dutyOfCareMealsCost = 0;
-  if (dutyOfCareMeals) {
-    dutyOfCareMealsCost = mealVoucherValue || 20;
-  }
-
-  // Duty of Care - Hotel
-  let dutyOfCareHotelCost = 0;
-  if (dutyOfCareHotel) {
-    dutyOfCareHotelCost = pax.hotelCost || 150;
-  }
-
-  // Meal Voucher (Goodwill)
-  let mealVoucherCost = 0;
-  if (goodwillAction?.mealVoucherOffered === true) {
-    mealVoucherCost = mealVoucherValue || 15;
-  }
-
-  // OAL Rebook Cost (based on action)
-  let oalRebookCost = 0;
-  if (primaryAction === 'REBOOK_PARTNER') {
-    oalRebookCost = 433.86; // Realistic partner rebook cost
-  } else if (primaryAction === 'REBOOK_INTERLINE') {
-    oalRebookCost = 550; // More expensive interline
-  } else if (primaryAction === 'REBOOK_SAME_METAL') {
-    oalRebookCost = 0; // No cost for same metal
-  }
-
-  // Lounge Cost (operational sunk cost, not charged to recovery)
-  const loungeCost = 0;
-
-  // BUG 1: Calculate total from explicit sum - NOT from partial variables
-  const aeroAgentCost = Math.max(
-    0.1,
-    parseFloat(
-      (
-        (compensationCost ?? 0) +
-        (dutyOfCareMealsCost ?? 0) +
-        (dutyOfCareHotelCost ?? 0) +
-        (mealVoucherCost ?? 0) +
-        (oalRebookCost ?? 0) +
-        (loungeCost ?? 0)
-      ).toFixed(2)
-    )
-  );
-
-  // Get normalized loyalty tier early for use in CLV and churn calculations
-  const normalizedLoyaltyTier = (pax.tier || pax.loyaltyTier || 'Standard') as string;
-  const delayMinutes = Math.round(delayHours * 60);
-  const disruptionTypeStr = pax.disruptionType === 'CANCELLATION' ? 'CANCELLATION' : 'DELAY';
-  const isInternational = pax.origin !== pax.destination &&
-    !(pax.origin.startsWith('EU') && pax.destination.startsWith('EU'));
-
-  // BUG 5: Calculate CLV based on passenger attributes
-  const clv = calculateCLV(pax.cabin, normalizedLoyaltyTier, pax.ticketValue, isInternational);
-
-  // BUG 4: Churn propensity scaled to severity (using minutes)
-  const churnPropensity = getChurnPropensity(
-    delayMinutes,
-    disruptionTypeStr,
-    normalizedLoyaltyTier,
-    true // wasHandledWell - AeroAgent always handles proactively
-  );
-
-  // BUG 6: Legacy cost calculation with correct parameters
-  const legacyTotal = calculateLegacyCost(
-    primaryAction,
-    delayMinutes,
-    disruptionTypeStr,
-    jurisdiction,
-    pax.cabin,
-    normalizedLoyaltyTier,
-    pax.ticketValue,
-    pax.timing === 'Overnight' && hotelRequired
-  );
-
-  const legacy: CostBreakdown = {
-    dutyOfCare: dutyOfCareMealsCost + dutyOfCareHotelCost,
-    eu261: compensationCost,
-    usDot: 0,
-    churnPenalty: 0,
-    total: legacyTotal,
-    compensationCost,
-    oalRebookCost,
-    mealVoucherCost,
-    hotelCost: dutyOfCareHotelCost,
-    loungeCost,
-  };
-
-  // BUG 1: Ensure netSavings = legacyTotal - aeroAgentCost
-  const netSavings = legacyTotal - aeroAgentCost;
-
-  const eu261Max = cashCompensationOwed ? cashCompensationAmount : 0;
-  const eu261Likelihood = cashCompensationOwed ? 0.75 : 0; // Deterministic, realistic
-  const eu261EV = eu261Max * eu261Likelihood;
-  const churnEV = clv * churnPropensity;
-  const totalEV = (dutyOfCareMealsCost + dutyOfCareHotelCost) + eu261EV + churnEV;
-
-  // FIX 4: Extraordinary Circumstances Saving (EU261 weather/ATC exemption)
-  let extraordinaryCircumstancesSaving = 0;
-  if (
-    (pax.disruptionCause === 'WEATHER' || pax.disruptionCause === 'ATC') &&
-    (jurisdiction.includes('EU261') || jurisdiction.includes('UK261')) &&
-    delayHours >= 3
-  ) {
-    extraordinaryCircumstancesSaving = cashCompensationAmount;
-  }
-
-  // Recommended action mapping for backward compatibility
-  const recommendedAction: ActionType = primaryAction === 'NOTIFICATION_ONLY'
-    ? 'Original Flight Maintained + Notification Only'
-    : primaryAction === 'LOUNGE_ACCESS'
-      ? 'Original Flight Maintained + Lounge Access Issued'
-      : primaryAction === 'MEAL_VOUCHER'
-        ? 'Original Flight Maintained + Meal Voucher Issued'
-        : primaryAction === 'REBOOK_SAME_METAL'
-          ? 'Same Metal Recovery + Hotel & Meal Vouchers'
-          : primaryAction === 'REBOOK_PARTNER'
-            ? 'Partner Metal Recovery + Hotel & Meal Vouchers'
-            : primaryAction === 'REBOOK_INTERLINE'
-              ? 'Interline Metal Recovery + Hotel & Meal Vouchers'
-              : 'Manual Handling Required';
-
-  const suggestedStatus: PaxStatus = requiresAgentIntervention
-    ? 'pending_validation'
-    : isSpecialNeeds
-      ? 'pending_validation'
-      : 'auto_processed';
-
-  const rationale = `Priority Tier ${priorityTier} (${distressLevel}). ${regulatoryNote || 'Standard handling.'} Action: ${primaryAction}.`;
-  const valueTag = isPremiumCabin ? '🏆 Premium Care' : distressLevel === 'Critical' ? '🆘 High Touch' : '🏨 Cost Optimized';
-
-  const liabilityEngine: DisruptionLiabilityEngine = {
-    jurisdiction: {
-      primaryFramework: `[${jurisdiction} Applicable]`,
-    },
-    itinerary: {
-      status: rebookEligible ? 'Rebooked' : 'Delayed',
-      newFlight: rebookCarrierOrder.includes('INTERLINE')
-        ? pax.oalFlightNumber
-        : pax.flightNumber,
-      newETD: rebookEligible ? 'Tomorrow, 10:00 Local' : 'Today, 14:00 Local',
-      newSeat: '4A',
-      isSameMetal: rebookCarrierOrder[0] === 'SAME_METAL',
-    },
-    dutyOfCare: {
-      hotel: {
-        eligible: hotelRequired || dutyOfCareHotel,
-        provider: 'Clarion Hotel Helsinki Airport',
-      },
-      meals: {
-        eligible: mealsRequired || dutyOfCareMeals,
-        voucherValue: mealsRequired ? mealVoucherValue || 25 : dutyOfCareMeals ? 20 : 0,
-      },
-      transport: {
-        eligible: hotelRequired || dutyOfCareTransport,
-        type: 'Standard Shuttle',
-      },
-      lounge: {
-        eligible: loungeRequired,
-        name: isPremiumTier ? 'Finnair Platinum Wing' : 'Finnair Business Lounge',
-      },
-    },
-    financialExposure: {
-      dutyOfCare: {
-        local: dutyOfCareMealsCost + dutyOfCareHotelCost,
-        breakdown: rebookEligible
-          ? `Rebook (€${aeroAgentCost}) + Hotel (€${hotelRequired ? pax.hotelCost : 0})`
-          : `Meals (€${mealsRequired ? mealVoucherValue : 0})`,
-      },
-      eu261: {
-        ev: eu261EV,
-        max: eu261Max,
-        likelihood: eu261Likelihood,
-      },
-      churn: {
-        ev: churnEV,
-        clv,
-        propensity: churnPropensity,
-      },
-      totalAero: {
-        ev: aeroAgentCost,
-      },
-      deterministic: {
-        oalRebook: oalRebookCost,
-        dutyOfCare: dutyOfCareMealsCost + dutyOfCareHotelCost,
-      },
-      predictive: {
-        expectedEU261: eu261EV,
-        expectedChurn: churnEV,
-      },
-      optimizedPath: {
-        label: primaryAction.toUpperCase(),
-        color: '#0d9488',
-        bgColor: '#ccfbf1',
-      },
-    },
-  };
-
-  const regulatorySavingsPercent = legacyTotal > 0
-    ? (extraordinaryCircumstancesSaving / legacyTotal) * 100
-    : 0;
-
-  return {
-    isVIP: isPremiumCabin || isPremiumTier,
-    isOALEligible: isPremiumCabin || isPremiumTier || isSpecialNeeds,
-    legacy,
-    internal: {
-      dutyOfCare: hotelRequired ? pax.hotelCost + 40 : mealsRequired ? 25 : 0,
-      fare: pax.ticketValue * 2.5,
-      total: (pax.ticketValue * 2.5) + (hotelRequired ? pax.hotelCost + 40 : 0),
-    },
-    recommendedAction,
-    suggestedStatus,
-    valueTag,
-    aeroAgentCost,
-    netSavings,
-    rationale,
-    eu261Max,
-    eu261Likelihood,
-    eu261EV,
-    clv,
-    churnPropensity,
-    churnEV,
-    totalEV,
-    extraordinaryCircumstancesSaving,
-    regulatorySavingsPercent,
-    distressLevel,
-    regulatoryBasis: regulatoryAssessment?.regulatoryNote || jurisdiction,
-    liabilityEngine,
-  };
-}
 
 interface WhatsappMessageClaudeResponse {
   message: string;
@@ -941,7 +296,6 @@ function generateTemplateMessage(
   result: AnalysisResult
 ): WhatsAppMessage {
   const timestamp = new Date().toISOString();
-  const flightInfo = `${pax.flightNumber} ${pax.origin}→${pax.destination}`;
   const delayHours = Math.round((pax.delayHours || 0) * 10) / 10;
 
   // Determine tone based on distress level
@@ -964,41 +318,33 @@ function generateTemplateMessage(
   const paxName = pax.name.split(' ')[0]; // First name only
 
   switch (result.recommendedAction) {
-    case 'REBOOK':
+    case 'Same Metal Recovery + Hotel & Meal Vouchers':
+    case 'Partner Metal Recovery + Hotel & Meal Vouchers':
+    case 'Interline Metal Recovery + Hotel & Meal Vouchers':
+    case 'Alternative Flight + Hotel':
       messageType = 'rebook_confirmed';
-      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We've rebooked you on the next available flight with the same cabin class. Check your email for the new booking details for flight ${flightInfo}. Reply with HELP if you need anything.`;
-      includedElements.push('recovery_action');
-      break;
-
-    case 'REBOOK_ALT_AIRLINE':
-      messageType = 'rebook_pending';
-      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We're arranging a rebooking on an alternative airline. You'll receive details shortly. Please check your email and be ready to board. Reply with HELP if you have questions.`;
-      includedElements.push('recovery_action');
-      break;
-
-    case 'REFUND':
-      messageType = 'escalation';
-      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We're processing a full refund to your original payment method within 7 days. Thank you for your patience. Reply with HELP if you need assistance right now.`;
-      includedElements.push('recovery_action');
-      break;
-
-    case 'HOTEL':
-      messageType = 'hotel';
-      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We've arranged a hotel stay for you tonight at a partner property near the airport. Use the link in your confirmation email to check in. Meals covered. Reply with HELP if you need support.`;
+      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We've rebooked you on the next available flight with hotel accommodation for tonight. Check your email for full details. Reply with HELP if you need anything.`;
       includedElements.push('recovery_action');
       qrCodeRequired = true;
       qrCodeType = 'ticket';
       break;
 
-    case 'LOUNGE':
+    case 'Alternative Flight Only':
+    case 'Premium Recovery Option':
+      messageType = 'rebook_confirmed';
+      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We've arranged an alternative flight for you. You'll receive the updated boarding pass details shortly. Reply with HELP if you have questions.`;
+      includedElements.push('recovery_action');
+      break;
+
+    case 'Original Flight Maintained + Lounge Access Issued':
       messageType = 'lounge';
-      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We've given you complimentary lounge access while you wait. Scan the QR below to enter. Enjoy refreshments and comfortable seating. [QR CODE PLACEHOLDER]`;
+      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We've arranged complimentary lounge access for you while you wait. Scan the QR code below to enter and enjoy refreshments. [QR CODE PLACEHOLDER]`;
       includedElements.push('recovery_action', 'qr_code');
       qrCodeRequired = true;
       qrCodeType = 'lounge';
       break;
 
-    case 'MEALS':
+    case 'Original Flight Maintained + Meal Voucher Issued':
       messageType = 'meal_voucher';
       message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We're providing meal vouchers for you and your travel party. Scan the QR code below to redeem at airport restaurants. [QR CODE PLACEHOLDER]`;
       includedElements.push('recovery_action', 'qr_code');
@@ -1006,15 +352,27 @@ function generateTemplateMessage(
       qrCodeType = 'voucher';
       break;
 
-    case 'COMPENSATION':
-      messageType = 'escalation';
-      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. You qualify for compensation under EU261/2004 (€250-400). This will be processed separately to your registered email. Reply with HELP if you have questions.`;
+    case 'Hotel and Meal Vouchers':
+      messageType = 'hotel';
+      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. We've arranged hotel accommodation and meal vouchers for you. Check your email for hotel details and scan the QR code for your meals. [QR CODE PLACEHOLDER]`;
+      includedElements.push('recovery_action', 'qr_code');
+      qrCodeRequired = true;
+      qrCodeType = 'voucher';
+      break;
+
+    case 'Priority Concierge Triage':
+    case 'Manual Handling Required':
+    case 'Manual Override':
+      messageType = 'ESCALATION';
+      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. A dedicated agent is personally handling your case and will be in touch momentarily. We appreciate your patience.`;
       includedElements.push('recovery_action');
       break;
 
+    case 'Original Flight Maintained + Notification Only':
+    case 'Notification Only':
     default:
-      messageType = 'notification_only';
-      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. Our team is working to resolve this. We'll update you shortly with next steps. Reply with HELP if you need immediate assistance.`;
+      messageType = 'INFORMATIONAL';
+      message = `Hi ${paxName}, we sincerely apologize that ${delayText}. Our team is working to resolve this as quickly as possible. We'll update you shortly with next steps. Reply with HELP if you need immediate assistance.`;
       includedElements.push('recovery_action');
   }
 
@@ -1046,7 +404,9 @@ export async function generateWhatsAppMessage(
       'Low': 'neutral'
     };
 
-    const tone = toneToDiagnostics[result.distressLevel] || 'neutral';
+    const tone = (result.distressLevel
+      ? toneToDiagnostics[result.distressLevel as keyof typeof toneToDiagnostics]
+      : undefined) ?? 'neutral';
 
     // Call Claude API to generate message
     const response = await fetch('/api/claude', {
@@ -1145,6 +505,221 @@ interface GateAgentClaudeResponse {
   priorityScore: number;
   flaggedIssues?: string[];
   agentTalkingPoints?: string[];
+  recoveryOptions?: RecoveryOption[];
+}
+
+/**
+ * Compute baseline rule engine result using helper functions
+ * Used as foundation for Claude AI enhancement
+ */
+export function computeRuleEngineBaseline(
+  pax: Passenger,
+  actionOverride?: ActionType
+): AnalysisResult {
+  const delayMinutes = pax.delayMinutes || 0;
+  const disruptionType = pax.disruptionType || 'DELAY';
+  const jurisdiction = pax.jurisdiction || 'EU261';
+  const haul = pax.haul || 'Short';
+
+  // EU261 Article 9 haul-based care thresholds (departure delay)
+  // Short (<1500km): meals from 2h; Medium (1500–3500km): meals from 3h; Long (>3500km): meals from 4h
+  const eu261MealsThreshold = haul === 'Short' ? EU261_MEALS_SHORT_THRESHOLD : haul === 'Medium' ? EU261_SHORT_MEDIUM_THRESHOLD : EU261_LONG_THRESHOLD;
+
+  // Compute overnight stranding: canonical threshold 8h (480 min)
+  const isOvernightStranding = delayMinutes >= OVERNIGHT_THRESHOLD_MINUTES;
+
+  // APPR cash compensation thresholds (arrival delay, CAD)
+  const isAPPR = jurisdiction.includes('APPR');
+  const isAPPRLarge = jurisdiction === 'APPR_LARGE';
+  let apprCashComp = 0;
+  if (isAPPR && delayMinutes >= EU261_SHORT_MEDIUM_THRESHOLD) {
+    if (isAPPRLarge) {
+      apprCashComp = delayMinutes >= 540 ? 1000 : delayMinutes >= 360 ? 700 : 400;
+    } else {
+      apprCashComp = delayMinutes >= 540 ? 500 : delayMinutes >= 360 ? 250 : 125;
+    }
+  }
+
+  // Smart action recommendation based on severity and jurisdiction
+  let primaryAction = actionOverride;
+  if (!primaryAction) {
+    if (disruptionType === 'CANCELLATION' || delayMinutes >= 300) {
+      primaryAction = 'Same Metal Recovery + Hotel & Meal Vouchers';
+    } else if (jurisdiction.includes('EU261') && delayMinutes >= eu261MealsThreshold) {
+      primaryAction = 'Original Flight Maintained + Meal Voucher Issued';
+    } else if (jurisdiction.includes('USDOT')) {
+      const isDomestic = jurisdiction === 'USDOT_DOMESTIC';
+      const usdotThreshold = isDomestic ? EU261_SHORT_MEDIUM_THRESHOLD : 300;
+      primaryAction = delayMinutes >= usdotThreshold
+        ? 'Original Flight Maintained + Meal Voucher Issued'
+        : 'Original Flight Maintained + Notification Only';
+    } else if (isAPPR && delayMinutes >= 540) {
+      // APPR 9h+ — rerouting obligation for large carriers
+      primaryAction = isAPPRLarge
+        ? 'Same Metal Recovery + Hotel & Meal Vouchers'
+        : 'Original Flight Maintained + Meal Voucher Issued';
+    } else if (delayMinutes >= EU261_MEALS_SHORT_THRESHOLD) {
+      primaryAction = 'Original Flight Maintained + Meal Voucher Issued';
+    } else {
+      primaryAction = 'Original Flight Maintained + Notification Only';
+    }
+  }
+
+  // Determine regulatory basis from jurisdiction
+  let regulatoryBasis = 'None';
+  if (jurisdiction.includes('EU261')) {
+    regulatoryBasis = 'EU261';
+  } else if (jurisdiction.includes('USDOT')) {
+    regulatoryBasis = 'USDOT';
+  } else if (isAPPR) {
+    regulatoryBasis = 'APPR';
+  }
+
+  // Derive duty of care flags — EU261 haul-based; APPR mirrors EU261 thresholds
+  const dutyOfCareHotel = disruptionType === 'CANCELLATION' || isOvernightStranding || delayMinutes >= 300;
+  const dutyOfCareMeals = disruptionType === 'CANCELLATION' ||
+    (jurisdiction.includes('EU261') && delayMinutes >= eu261MealsThreshold) ||
+    (!jurisdiction.includes('EU261') && delayMinutes >= EU261_MEALS_SHORT_THRESHOLD);
+  const mealVoucherOffered = dutyOfCareMeals;
+  const mealVoucherValue = dutyOfCareMeals ? MEAL_VOUCHER_RATE : 0;
+
+  // Determine if international (affects CLV multiplier)
+  const isInternational = pax.haul === 'Long' || pax.haul === 'Medium';
+
+  // Calculate costs using helper functions
+  const aeroAgentCost = calculateAeroAgentCost(
+    primaryAction,
+    pax.ticketValue || 0,
+    pax.oalCost || 0,
+    pax.hotelCost || 0,
+    mealVoucherOffered,
+    mealVoucherValue,
+    dutyOfCareHotel,
+    dutyOfCareMeals  // FIX 7: was missing 8th argument
+  );
+
+  const legacyCostTotal = calculateLegacyCost(
+    primaryAction,
+    delayMinutes,
+    disruptionType,
+    jurisdiction,
+    pax.cabin || 'Economy',
+    pax.loyaltyTier || 'None',
+    pax.ticketValue || 0,
+    dutyOfCareHotel
+  );
+
+  const clv = calculateCLV(
+    pax.cabin || 'Economy',   // FIX 6: cabin first
+    pax.loyaltyTier || 'None', // loyaltyTier second
+    pax.ticketValue || 350,   // ticketValue third
+    isInternational            // FIX 6: was missing
+  );
+
+  const churnPropensity = getChurnPropensity(
+    delayMinutes,
+    disruptionType,
+    pax.loyaltyTier || 'None'
+  );
+
+  const churnEV = clv * churnPropensity;
+  const netSavings = legacyCostTotal - aeroAgentCost;
+
+  // Determine distress level
+  let distressLevel = 'Low';
+  if (disruptionType === 'CANCELLATION') {
+    distressLevel = 'High';
+  } else if (delayMinutes >= 600) {
+    distressLevel = 'Critical';
+  } else if (delayMinutes >= 300) {
+    distressLevel = 'High';
+  } else if (delayMinutes >= EU261_MEALS_SHORT_THRESHOLD) {
+    distressLevel = 'Medium';
+  }
+
+  // EU261 extraordinary circumstances — WEATHER, ATC, SECURITY waive cash compensation (Article 5(3))
+  const isExtraordinaryCircumstance = ['WEATHER', 'ATC', 'SECURITY'].includes(pax.disruptionCause || '');
+
+  // EU261 cash compensation amount (distance-based, zero if extraordinary circumstances)
+  // Long-haul flights (>3500 km) require ≥240 min delay; short/medium require ≥180 min (Article 7)
+  const eu261CashCompThreshold = haul === 'Long' ? EU261_LONG_THRESHOLD : EU261_SHORT_MEDIUM_THRESHOLD;
+  const eu261CashComp =
+    jurisdiction.includes('EU261') && delayMinutes >= eu261CashCompThreshold && !isExtraordinaryCircumstance
+      ? haul === 'Short' ? EU261_SHORT_HAUL_AMOUNT : haul === 'Medium' ? EU261_MEDIUM_HAUL_AMOUNT : EU261_LONG_HAUL_AMOUNT
+      : 0;
+
+  // Total cash compensation owed (EU261 or APPR)
+  const cashCompensationAmount = eu261CashComp > 0 ? eu261CashComp : apprCashComp;
+
+  // Build legacy cost breakdown
+  const legacyCostBreakdown: CostBreakdown = {
+    dutyOfCare: Math.min(45 + (legacyCostTotal > 50 ? 150 : 0), legacyCostTotal),
+    eu261: eu261CashComp,
+    usDot: 0,
+    churnPenalty: 0,
+    total: legacyCostTotal
+  };
+
+  // Return baseline result
+  return {
+    isVIP: pax.loyaltyTier === 'Platinum',
+    isOALEligible: true,
+    legacy: legacyCostBreakdown,
+    internal: {
+      dutyOfCare: 0,
+      fare: pax.ticketValue || 0,
+      total: (pax.ticketValue || 0) + (pax.oalCost || 0)
+    },
+    recommendedAction: primaryAction as ActionType,
+    suggestedStatus: 'pending_triage',
+    valueTag: 'standard',
+    aeroAgentCost,
+    netSavings,
+    rationale: 'Rule engine baseline — awaiting Claude AI enhancement',
+    distressLevel,
+    eu261Max: eu261CashComp,
+    eu261Likelihood: eu261CashComp > 0 ? 0.7 : 0,
+    eu261EV: eu261CashComp * (eu261CashComp > 0 ? 0.7 : 0),
+    cashCompensationAmount,
+    clv,
+    churnPropensity,
+    churnEV,
+    totalEV: churnEV + eu261CashComp * (eu261CashComp > 0 ? 0.7 : 0),
+    regulatoryBasis,
+    aiPowered: false,
+    goodwillAction: {
+      notificationRequired: true,
+      mealVoucherOffered: dutyOfCareMeals,
+      mealVoucherValue: dutyOfCareMeals ? MEAL_VOUCHER_RATE : 0,
+      loungeAccessOffered: (pax.cabin === 'Business' || pax.cabin === 'F' || pax.cabin === 'J') && delayMinutes >= 90,
+      loungeAccess: (pax.cabin === 'Business' || pax.cabin === 'F' || pax.cabin === 'J') && delayMinutes >= 90,
+      personalOutreachRequired: pax.loyaltyTier === 'Platinum' || pax.tier === 'Platinum' || pax.tier === 'Platinum Lumo' || pax.tier === 'oneworld Emerald',
+      whatsappMessageType: (dutyOfCareMeals ? 'MEAL_VOUCHER' : 'NOTIFICATION_ONLY') as WhatsappMessageType,
+      talkToAgentOption: delayMinutes >= 300 || disruptionType === 'CANCELLATION',
+    },
+    recoveryDecision: {
+      primaryAction: (() => {
+        const a = (primaryAction as string).toLowerCase();
+        if (a.includes('partner metal')) return 'REBOOK_PARTNER';
+        if (a.includes('interline metal')) return 'REBOOK_INTERLINE';
+        if (a.includes('same metal') || a.includes('recovery')) return 'REBOOK_SAME_METAL';
+        if (a.includes('hotel') && (a.includes('recovery') || a.includes('rebook') || a.includes('metal'))) return 'REBOOK_AND_HOTEL';
+        if (a.includes('hotel')) return 'HOTEL_AND_MEALS';
+        if (a.includes('lounge')) return 'LOUNGE_ACCESS';
+        if (a.includes('meal') || a.includes('voucher')) return 'MEAL_VOUCHER';
+        if (a.includes('concierge') || a.includes('manual') || a.includes('priority')) return 'ESCALATE_TO_AGENT';
+        return 'NOTIFICATION_ONLY';
+      })() as RecoveryPrimaryAction,
+      rebookEligible: (primaryAction as string).toLowerCase().includes('recovery') || (primaryAction as string).toLowerCase().includes('metal') || disruptionType === 'CANCELLATION',
+      rebookCarrierOrder: pax.partnerSeatAvailable ? ['SAME_METAL', 'PARTNER', 'INTERLINE'] : ['SAME_METAL'],
+      hotelRequired: dutyOfCareHotel,
+      mealsRequired: dutyOfCareMeals,
+      loungeRequired: (pax.cabin === 'Business' || pax.cabin === 'F' || pax.cabin === 'J') && delayMinutes >= 90,
+      acceptableRebookWindow: delayMinutes >= 600 ? 'NEXT_DAY' : 'SAME_DAY',
+      offerRefundAlternative: disruptionType === 'CANCELLATION',
+      requiresAgentIntervention: (primaryAction as string).includes('Concierge') || (primaryAction as string).includes('Manual') || pax.ssrCode === 'UMNR',
+    },
+  };
 }
 
 export async function computeEngineAI(
@@ -1153,53 +728,71 @@ export async function computeEngineAI(
 ): Promise<AnalysisResult> {
   const timestamp = new Date().toISOString();
 
-  // Step 1: Run rule engine first
-  const ruleResult = computeEngineLocal(pax, actionOverride);
+  // Step 1: Run rule engine baseline
+  const ruleResult = computeRuleEngineBaseline(pax, actionOverride);
 
-  try {
-    // Step 2: Call Claude API with new payload structure
+  // Retry configuration: up to 2 retries with exponential backoff for 429/500/529
+  const MAX_RETRIES = 2;
+  const requestBody = JSON.stringify({
+    useCase: 'gate-agent',
+    payload: {
+      passenger: {
+        pnr: pax.pnr,
+        name: pax.name,
+        cabin: pax.cabin,
+        tier: pax.tier,
+        loyaltyTier: pax.loyaltyTier,
+        ssrCode: pax.ssrCode,
+        flightNumber: pax.flightNumber,
+        origin: pax.origin,
+        destination: pax.destination,
+        disruptionType: pax.disruptionType,
+        disruptionCause: pax.disruptionCause,
+        delayMinutes: Math.round((pax.delayHours || 0) * 60),
+        jurisdiction: pax.jurisdiction,
+        hasConnection: pax.hasConnection,
+        connectionBufferMinutes: pax.connectionBufferMinutes,
+        travelPartySize: pax.travelPartySize,
+        hasInfant: pax.hasInfant,
+        ticketValue: pax.ticketValue
+      },
+      ruleEngineAssessment: {
+        recommendedAction: ruleResult.recommendedAction,
+        suggestedStatus: ruleResult.suggestedStatus,
+        distressLevel: ruleResult.liabilityEngine?.itinerary.status === 'Rebooked' ? 'High' : 'Medium',
+        valuationTag: ruleResult.valueTag,
+        liabilityExposure: {
+          eu261: ruleResult.eu261Max,
+          dutyOfCare: ruleResult.legacy.dutyOfCare,
+          total: ruleResult.legacy.total
+        }
+      }
+    }
+  });
+
+  let lastError: Error = new Error('Unknown error');
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        // Exponential backoff: 1s, 2s
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+        console.log(`[engine] Retry ${attempt}/${MAX_RETRIES} for PNR: ${pax.pnr}`);
+      }
+
+    // Step 2: Call Claude API with retry-safe payload
     const response = await fetch('/api/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        useCase: 'gate-agent',
-        payload: {
-          passenger: {
-            pnr: pax.pnr,
-            name: pax.name,
-            cabin: pax.cabin,
-            tier: pax.tier,
-            loyaltyTier: pax.loyaltyTier,
-            ssrCode: pax.ssrCode,
-            flightNumber: pax.flightNumber,
-            origin: pax.origin,
-            destination: pax.destination,
-            disruptionType: pax.disruptionType,
-            disruptionCause: pax.disruptionCause,
-            delayMinutes: Math.round((pax.delayHours || 0) * 60),
-            jurisdiction: pax.jurisdiction,
-            hasConnection: pax.hasConnection,
-            connectionBufferMinutes: pax.connectionBufferMinutes,
-            travelPartySize: pax.travelPartySize,
-            hasInfant: pax.hasInfant,
-            ticketValue: pax.ticketValue
-          },
-          ruleEngineAssessment: {
-            recommendedAction: ruleResult.recommendedAction,
-            suggestedStatus: ruleResult.suggestedStatus,
-            distressLevel: ruleResult.liabilityEngine?.itinerary.status === 'Rebooked' ? 'High' : 'Medium',
-            valuationTag: ruleResult.valueTag,
-            liabilityExposure: {
-              eu261: ruleResult.eu261Max,
-              dutyOfCare: ruleResult.legacy.dutyOfCare,
-              total: ruleResult.legacy.total
-            }
-          }
-        }
-      })
+      body: requestBody
     });
 
     if (!response.ok) {
+      const retryable = response.status === 429 || response.status === 500 || response.status === 529;
+      if (retryable && attempt < MAX_RETRIES) {
+        lastError = new Error(`API error: ${response.status}`);
+        continue; // retry
+      }
       throw new Error(`API error: ${response.status}`);
     }
 
@@ -1211,6 +804,9 @@ export async function computeEngineAI(
     );
 
     // Step 3: Merge Claude response into rule engine result
+    console.log(
+      `[${timestamp}] Claude AI Analysis | PNR: ${pax.pnr} | useCase: gate-agent | Source: Claude API`
+    );
     return {
       ...ruleResult,
       aiPowered: true,
@@ -1221,21 +817,27 @@ export async function computeEngineAI(
       aiRegulatoryNote: data.regulatoryNote,
       aiPriorityScore: data.priorityScore,
       aiFlaggedIssues: data.flaggedIssues ?? [],
-      aiAgentTalkingPoints: data.agentTalkingPoints ?? []
+      aiAgentTalkingPoints: data.agentTalkingPoints ?? [],
+      recoveryOptions: data.recoveryOptions // MOD 3: Multiple recovery options from AI
     };
-  } catch (error) {
-    const timestamp2 = new Date().toISOString();
-    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    console.log(
-      `[${timestamp2}] Claude AI Analysis Failed | PNR: ${pax.pnr} | useCase: gate-agent | Source: Local Fallback | Error: ${errorMsg}`
-    );
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < MAX_RETRIES) continue; // will retry
+    }
+  } // end retry loop
 
-    // Silent fallback to rule engine
-    return {
-      ...ruleResult,
-      aiPowered: false
-    };
-  }
+  // All retries exhausted — fall back to rule engine result
+  const timestamp2 = new Date().toISOString();
+  console.error(
+    `[${timestamp2}] Claude AI Analysis Failed | PNR: ${pax.pnr} | useCase: gate-agent | Status: REQUIRES RETRY | Error: ${lastError.message}`
+  );
+
+  // MOD 4: Return aiUnavailable flag - UI shows retry button, NOT silent fallback
+  return {
+    ...ruleResult,
+    aiUnavailable: true,
+    aiPoweredError: lastError.message
+  };
 }
 
 export async function generateHandoffBriefing(
@@ -1272,11 +874,11 @@ export async function generateHandoffBriefing(
             hasInfant: pax.hasInfant
           },
           recoveryArranged: {
-            primaryAction: result.recoveryDecision.primaryAction,
-            mealVoucher: result.goodwillAction.mealVoucherOffered,
-            loungeAccess: result.goodwillAction.loungeAccessOffered,
-            hotelArranged: result.recoveryDecision.hotelRequired,
-            rebookEligible: result.recoveryDecision.rebookEligible
+            primaryAction: result.recoveryDecision?.primaryAction,
+            mealVoucher: result.goodwillAction?.mealVoucherOffered ?? false,
+            loungeAccess: result.goodwillAction?.loungeAccessOffered ?? false,
+            hotelArranged: result.recoveryDecision?.hotelRequired ?? false,
+            rebookEligible: result.recoveryDecision?.rebookEligible ?? false
           },
           conversationHistory: conversationHistory.map(m => ({
             role: m.role,
@@ -1319,7 +921,7 @@ export async function generateHandoffBriefing(
       passengerConcern: escalationReason,
       emotionalState: 'Distressed',
       urgencyLevel: (result.aiDistressLevel || 'High') as 'Critical' | 'High' | 'Medium' | 'Low',
-      whatWasArranged: [result.recoveryDecision.primaryAction],
+      whatWasArranged: [result.recoveryDecision?.primaryAction ?? 'Notification Only'],
       suggestedOpeningLine: `Hi ${pax.name.split(' ')[0]}, I can see you need some help — I am here and I have your full details in front of me.`,
       sensitiveIssues: result.aiFlaggedIssues ?? [],
       recommendedAction: `Review passenger situation and provide personalized assistance with their ${pax.disruptionType || 'disruption'}.`,
@@ -1358,10 +960,10 @@ function generateAuditNarrativeFallback(
   let auditRiskLevel: 'Low' | 'Medium' | 'High' = 'Low';
 
   // Flag non-compliant cases
-  if (result.distressLevel === 'Critical' && result.recoveryDecision.requiresAgentIntervention) {
+  if (result.distressLevel === 'Critical' && result.recoveryDecision?.requiresAgentIntervention) {
     complianceStatus = 'Review Required';
     auditRiskLevel = 'High';
-  } else if (result.recoveryDecision.requiresAgentIntervention) {
+  } else if (result.recoveryDecision?.requiresAgentIntervention) {
     complianceStatus = 'Review Required';
     auditRiskLevel = 'Medium';
   }
@@ -1443,12 +1045,12 @@ export async function generateAuditNarrative(
             finalAction: result.recommendedAction,
             wasOverridden: !!pax.overrideAction,
             overrideRationale: pax.overrideRationale || '',
-            rebookEligible: result.recoveryDecision.rebookEligible,
-            hotelRequired: result.recoveryDecision.hotelRequired,
-            mealsRequired: result.recoveryDecision.mealsRequired,
-            loungeRequired: result.recoveryDecision.loungeRequired,
-            offerRefundAlternative: result.recoveryDecision.offerRefundAlternative,
-            requiresAgentIntervention: result.recoveryDecision.requiresAgentIntervention
+            rebookEligible: result.recoveryDecision?.rebookEligible ?? false,
+            hotelRequired: result.recoveryDecision?.hotelRequired ?? false,
+            mealsRequired: result.recoveryDecision?.mealsRequired ?? false,
+            loungeRequired: result.recoveryDecision?.loungeRequired ?? false,
+            offerRefundAlternative: result.recoveryDecision?.offerRefundAlternative ?? false,
+            requiresAgentIntervention: result.recoveryDecision?.requiresAgentIntervention ?? false
           },
           financials: {
             ticketValue: pax.ticketValue || 0,
@@ -1538,5 +1140,7 @@ export async function generateAuditNarrative(
   }
 }
 
-// Default export: synchronous rule-based engine for seed generation
-export const computeEngine = computeEngineLocal;
+
+// MOD 4: AI-ONLY PROCESSING - No fallback to rule engine
+// All analysis must go through Claude API with explicit aiUnavailable flag on failure
+export const computeEngine = computeEngineAI;

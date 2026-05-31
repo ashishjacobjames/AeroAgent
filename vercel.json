@@ -2,14 +2,12 @@
   "version": 2,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "devCommand": "npm run dev:vite",
+  "devCommand": "node dev-server.js",
   "env": {
     "ANTHROPIC_API_KEY": "@anthropic-api-key"
   },
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
