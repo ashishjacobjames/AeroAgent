@@ -1,4 +1,27 @@
+/*
+ * SYNC REQUIRED — must match dev-server.js
+ * - PASSENGER_CHAT_SYSTEM_PROMPT
+ * - buildUserMessage (passenger-chat branch)
+ * - passenger-chat model: claude-haiku-4-5-20251001
+ * - passenger-chat max_tokens: 450
+ * - server safety net: passengerCount >= 3
+ * Last verified in sync: 2026-05-30
+ */
 import { VercelRequest, VercelResponse } from '@vercel/node';
+
+// MOD 3: Recovery Option structure
+interface RecoveryOption {
+  id: string;
+  title: string;
+  description: string;
+  primaryAction: string;
+  costToAeroAgent: number;
+  passengerValue: string;
+  timeline: string;
+  regulatoryBasis: string;
+  suitabilityReason: string;
+  flaggedConcerns?: string[];
+}
 
 // Gate Agent Response Types
 interface GateAgentResponse {
@@ -12,15 +35,22 @@ interface GateAgentResponse {
   priorityScore: number;
   flaggedIssues?: string[];
   agentTalkingPoints?: string[];
+  recoveryOptions?: RecoveryOption[]; // MOD 3: Multiple options
 }
 
 // Passenger Chat Response Types
 interface PassengerChatResponse {
   message: string;
+  escalationReady: boolean;
   stressSignals: string[];
-  escalate: boolean;
-  escalationReason: string | null;
-  updatedDistressLevel: 'Critical' | 'High' | 'Medium' | 'Low';
+  distressLevel: 'Critical' | 'High' | 'Medium' | 'Low';
+  gatheredContext: {
+    passengerConcern: string;
+    preferredResolution: string;
+    emotionalState: 'Calm' | 'Frustrated' | 'Anxious' | 'Angry' | 'Distressed';
+    urgencyFlag: boolean;
+    keyDetails: string[];
+  };
 }
 
 // CFO Audit Response Types
@@ -96,107 +126,50 @@ interface AnthropicResponse {
   };
 }
 
-const GATE_AGENT_SYSTEM_PROMPT = `You are an AI recovery advisor for airline gate agents handling disrupted passengers.
+const GATE_AGENT_SYSTEM_PROMPT = `You are an AI recovery advisor for airline gate agents. You receive a passenger summary and pre-computed rule engine assessment. Do NOT recompute rules — validate and enhance them.
 
-You have deep expertise in:
-- EU261/2004 and UK261 passenger rights
-- US DOT refund and delay regulations
-- Canada APPR large and small carrier rules
-- Airline duty of care obligations
-- IROPS recovery best practices
+Your job:
+1. Write a 2-sentence justification the gate agent reads in 5 seconds
+2. Assess distress level holistically
+3. Flag unusual issues (UMNR, medical, connection risk, downgrade consent)
+4. Generate 2-3 recovery options
 
-You receive a passenger object and a pre-computed rule engine assessment.
-Your job is NOT to recompute the rules.
-Your job is to:
-
-1. Validate the rule engine recommendation using your judgment
-2. Identify any nuance the rules missed
-3. Assess the passenger's distress level holistically — not just by score
-4. Write a justification the gate agent can read in 5 seconds and use to explain the decision to the passenger face to face
-5. Flag anything unusual or requiring special attention
-
-Key regulatory rules to always apply:
-- EU261 extraordinary circumstances (weather/ATC): duty of care ALWAYS owed, cash compensation WAIVED — cite Article 5(3)
-- US DOT: refund owed regardless of cause
-- APPR large carrier: reroute on any carrier if delay > 9 hours
-- UMNR: own airline only, agent must call destination guardian, daytime flights only
-- Downgrade: consent required from premium passenger before rebook confirmed
-
-Goodwill policy:
-- Always notify, regardless of cause
-- Delay 90min-3h: meal voucher (Economy), lounge access (Business/First)
-- Delay 3h+: meals for all, lounge for premium, personal outreach for priority passengers
-- Actions taken regardless of cause — weather does not excuse poor service
-
-Priority hierarchy:
-1. Vulnerable (MEDA, UMNR, WCHR, WCHC, WCHS, DEAF, BLND, DPNA, MAAS)
-2. Premium cabin (First, Business)
-3. Loyal members (Gold, Platinum)
-4. Standard passengers
+Key rules:
+- EU261 extraordinary circumstances (weather/ATC/security): duty of care owed, cash comp WAIVED (Article 5(3))
+- UMNR: own airline only, daytime flights, call guardian
+- Downgrade: premium passenger consent required
+- APPR large carrier: reroute on any carrier if delay > 9h
+- Goodwill: always notify; lounge for Business/First 90min+; meals for all 3h+
 
 Respond ONLY in valid JSON:
 {
   "recommendedAction": string,
-  "details": "one sentence specific action",
-  "justification": "2-3 sentences the gate agent reads in 5 seconds — plain English, warm but professional, explains the why not just the what",
+  "details": "one sentence",
+  "justification": "2 sentences — plain English, warm, explains the why",
   "distressLevel": "Critical"|"High"|"Medium"|"Low",
-  "distressReason": "one sentence — primary driver of passenger distress",
+  "distressReason": "one sentence",
   "regulatoryBasis": "EU261"|"USDOT"|"APPR"|"Goodwill"|"None",
-  "regulatoryNote": "one sentence — specific obligation in this case",
+  "regulatoryNote": "one sentence",
   "priorityScore": number 0-100,
-  "flaggedIssues": ["array of anything unusual requiring agent attention, empty array if none"],
-  "agentTalkingPoints": ["2-3 bullet points the agent can use when speaking to the passenger directly"]
+  "flaggedIssues": ["array or empty"],
+  "agentTalkingPoints": ["2-3 points"],
+  "recoveryOptions": [
+    {
+      "id": "option-1",
+      "title": string,
+      "description": "one sentence",
+      "primaryAction": string,
+      "costToAeroAgent": number,
+      "passengerValue": string,
+      "timeline": string,
+      "regulatoryBasis": string,
+      "suitabilityReason": string,
+      "flaggedConcerns": []
+    }
+  ]
 }`;
 
-const PASSENGER_CHAT_SYSTEM_PROMPT = `You are a warm, empathetic airline disruption assistant speaking directly to a disrupted passenger via chat. Your role is to provide compassionate support, clarify recovery arrangements, and recognize when a human agent is needed.
-
-TONE GUIDELINES:
-- Never robotic or corporate. Speak like a caring airline representative.
-- Be warm, clear, and reassuring. Maximum 3 sentences per message.
-- Never say you are an AI unless directly asked.
-- Speak as the airline in first person: "We've arranged..." not "The airline has arranged..."
-- Acknowledge the passenger's stress and validate their feelings.
-- Be solution-focused: explain what IS being done, not what can't be done.
-
-STRESS SIGNAL DETECTION:
-Analyze each passenger message for these stress indicators:
-- TIME PRESSURE: "urgent", "stuck", "missing", "need to be", "deadline", time zones, connections
-- VULNERABILITY: Medical needs, traveling with children/elderly, disabilities, special services (UMNR, MEDA, WCHR, DEAF, BLND)
-- FRUSTRATION: Repeated complaints, anger, profanity, ALL CAPS, "still waiting", "nothing done", sarcasm
-- THIRD-PARTY CONCERNS: Family, business meetings, events, commitments, "boss", "wedding", "funeral", "surgery"
-- FINANCIAL CONCERN: "cost me", "money", "expensive", "refund", "compensation", "lost"
-- ESCALATION KEYWORDS: "manager", "supervisor", "complaint", "legal", "social media", "lawyer", "authority"
-
-ESCALATION TRIGGERS (escalate = true):
-1. MEDICAL EMERGENCIES: Any mention of medical conditions, medications, health risks, or medical equipment needed
-2. UMNR (Unaccompanied minors): Child traveling alone — requires agent confirmation and duty of care verification
-3. CRITICAL TIME PRESSURE: Connection risk, "missing important meeting", "funeral", "surgery", "critical work event"
-4. VULNERABILITY + FRUSTRATION: Elderly/disabled passenger showing escalating frustration or repeating requests
-5. EXTREME DISRUPTION + DELAY: 15+ hours delay AND escalating distress (frustration, third-party pressure)
-6. REPEATED ESCALATION KEYWORDS: Second+ mention of "manager", "legal", "complaint", "social media"
-7. SAFETY/SECURITY CONCERNS: Mentions of safety, security, conflict, or passenger dispute
-8. AGENT REQUEST: Passenger explicitly asks to speak with an agent, manager, or supervisor
-9. REFUND/COMPENSATION DISPUTE: Passenger disputes offered recovery, demands compensation, threatens action
-
-DO NOT ESCALATE for:
-- General questions you can answer (flight status, lounge access, how to use QR code)
-- Patience requests when recovery is already arranged
-- Policy questions (you can explain the policy)
-
-RESPONSE GUIDELINES:
-- If NOT escalating: Provide clear, concise answer with next steps. Offer help if they have other questions.
-- If ESCALATING: Use empathetic language, explain why human help is best, confirm escalation will happen "immediately" or "shortly".
-- Never promise things outside your authority (compensation amounts, upgrades, specific hotel).
-- If you don't know details: "Let me connect you with a specialist who can help" (escalate).
-
-Respond ONLY in valid JSON:
-{
-  "message": "your warm, helpful response to the passenger (max 3 sentences)",
-  "stressSignals": ["array of stress signals detected - use exact keywords from list above, empty if none"],
-  "escalate": true | false,
-  "escalationReason": "clear reason if escalate=true (which trigger, what the passenger needs); null if false",
-  "updatedDistressLevel": "Critical" | "High" | "Medium" | "Low"
-}`;
+const PASSENGER_CHAT_SYSTEM_PROMPT = `You are a warm, empathetic airline assistant. You speak as the airline in first person plural (we, us, our). You are given a task. Follow it precisely. Respond with ONLY the message text. No JSON. No explanation. Just the message.`;
 
 const CFO_AUDIT_SYSTEM_PROMPT = `You are a regulatory compliance analyst generating formal audit narratives for airline recovery decisions.
 
@@ -272,14 +245,20 @@ PAYMENT/COMPENSATION RULES:
 - Cash compensation (EU261): "€250-400 compensation will be processed separately per regulations"
 - Goodwill vouchers: Include as separate offer after primary recovery action
 
+MOD 6: THREE MESSAGE TYPES - consolidated approach:
+- INFORMATIONAL: Status updates, delay info, timeline (no immediate action)
+- ACTIONABLE: Recovery arranged with instructions and QR code
+- ESCALATION: Complex case requiring human agent intervention
+
 Respond ONLY in valid JSON:
 {
   "message": "the complete WhatsApp message text",
-  "messageType": "notification|voucher|lounge|hotel|rebook|escalation",
+  "messageType": "INFORMATIONAL|ACTIONABLE|ESCALATION",
   "tone": "neutral"|"apologetic"|"empathetic"|"urgent",
-  "includedElements": ["array of what's mentioned: flight_info, passenger_name, recovery_action, qr_code, escalation_option"],
+  "includedElements": ["array: flight_info, passenger_name, recovery_action, qr_code, escalation_option"],
   "qrCodeRequired": true|false,
-  "qrCodeType": "voucher"|"lounge"|"ticket"|null
+  "qrCodeType": "voucher"|"lounge"|"ticket"|null,
+  "requiresFollowUp": true|false
 }`;
 
 const ESCALATION_HANDOFF_SYSTEM_PROMPT = `You are an AI triage assistant preparing a handoff briefing for an airline gate agent who is about to join a disrupted passenger conversation.
@@ -337,8 +316,40 @@ function buildUserMessage(useCase: string, payload: Record<string, any>): string
   switch (useCase) {
     case 'gate-agent':
       return `Passenger: ${JSON.stringify(payload.passenger, null, 2)}\n\nRule Engine Assessment: ${JSON.stringify(payload.ruleEngineAssessment, null, 2)}`;
-    case 'passenger-chat':
-      return `Passenger message: "${payload.message}"\n\nPassenger context: ${JSON.stringify(payload.passengerContext, null, 2)}`;
+    case 'passenger-chat': {
+      const { message, task, passengerContext = {} } = payload;
+      const { firstName, destination, delayMinutes } = passengerContext;
+
+      if (task === 'A') {
+        // Task A: Write escalation closing message
+        return `Passenger name: ${firstName}
+Their message: "${message}"
+
+Write ONE warm, empathetic message that:
+1. Acknowledges what they said in one sentence
+2. Tells them a gate agent is on their way and has everything they need
+3. Asks them to stay on the chat
+
+Use "we" not "I". Max 3 sentences.
+Do not ask any questions. Do not offer options.
+Do not mention flights or airlines.`;
+      } else {
+        // Task B: Write first exchange message with one gentle question
+        return `Passenger name: ${firstName}
+Their message: "${message}"
+Flight disruption: ${delayMinutes} min delay to ${destination}
+
+Write ONE warm, empathetic message that:
+1. Acknowledges their frustration or concern
+2. Asks ONE gentle question to understand what matters most to them right now
+
+Use "we" not "I". Max 2 sentences.
+Do not offer options or alternatives.
+Do not mention flights or airlines.
+Do not say "let me check" or "I can check".`;
+      }
+    }
+
     case 'cfo-audit':
       return `Passenger: ${JSON.stringify(payload.passenger, null, 2)}\n\nRecovery Action Taken: ${payload.actionTaken}\n\nAnalysis: ${JSON.stringify(payload.analysis, null, 2)}`;
     case 'whatsapp-message':
@@ -352,7 +363,10 @@ function buildUserMessage(useCase: string, payload: Record<string, any>): string
 
 async function callClaudeAPI(
   systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  maxTokens: number = 400,
+  model: string = 'claude-sonnet-4-6',
+  messagesOverride?: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -363,15 +377,10 @@ async function callClaudeAPI(
   console.log('[callClaudeAPI] API key found, length:', apiKey.length);
 
   const requestBody: AnthropicRequestBody = {
-    model: 'claude-3-5-sonnet-20241022',
-    max_tokens: 512,
+    model,
+    max_tokens: maxTokens,
     system: systemPrompt,
-    messages: [
-      {
-        role: 'user',
-        content: userMessage
-      }
-    ]
+    messages: messagesOverride ?? [{ role: 'user', content: userMessage }]
   };
 
   console.log('[callClaudeAPI] Sending request to Anthropic API:', {
@@ -494,7 +503,9 @@ export default async function handler(
     let responseText: string;
     try {
       console.log('[AeroAgent API] Calling Claude API...');
-      responseText = await callClaudeAPI(systemPrompt, userMessage);
+      const tokenLimit = useCase === 'passenger-chat' ? 450 : 400;
+      const model = useCase === 'passenger-chat' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
+      responseText = await callClaudeAPI(systemPrompt, userMessage, tokenLimit, model);
       console.log('[AeroAgent API] Claude API response received, length:', responseText.length);
     } catch (apiError) {
       console.error('[AeroAgent API] Claude API call failed:', {
@@ -510,31 +521,41 @@ export default async function handler(
       return;
     }
 
-    // Parse JSON response from Claude
+    // Parse response based on useCase
     let parsedResponse: ClaudeResponse;
-    try {
-      // Clean up response (remove markdown fences if present)
-      const cleaned = responseText
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
 
-      console.log('[AeroAgent API] Attempting to parse response, cleaned length:', cleaned.length);
-      console.log('[AeroAgent API] Response preview:', cleaned.substring(0, 200));
+    if (useCase === 'passenger-chat') {
+      // passenger-chat returns plain text message, no JSON parsing needed
+      console.log('[AeroAgent API] passenger-chat: plain text response, length:', responseText.length);
+      parsedResponse = {
+        message: responseText.trim()
+      } as PassengerChatResponse;
+    } else {
+      // All other useCases return JSON
+      try {
+        // Clean up response (remove markdown fences if present)
+        const cleaned = responseText
+          .replace(/```json\n?/g, '')
+          .replace(/```\n?/g, '')
+          .trim();
 
-      parsedResponse = JSON.parse(cleaned);
-      console.log('[AeroAgent API] Successfully parsed response');
-    } catch (parseError) {
-      console.error('[AeroAgent API] Failed to parse Claude response as JSON:', {
-        error: parseError instanceof Error ? parseError.message : 'Unknown',
-        responseLength: responseText.length,
-        responsePreview: responseText.substring(0, 500)
-      });
-      res.status(500).json({
-        error: 'Invalid JSON response from Claude API',
-        details: 'Claude did not return valid JSON'
-      });
-      return;
+        console.log('[AeroAgent API] Attempting to parse response, cleaned length:', cleaned.length);
+        console.log('[AeroAgent API] Response preview:', cleaned.substring(0, 200));
+
+        parsedResponse = JSON.parse(cleaned);
+        console.log('[AeroAgent API] Successfully parsed response');
+      } catch (parseError) {
+        console.error('[AeroAgent API] Failed to parse Claude response as JSON:', {
+          error: parseError instanceof Error ? parseError.message : 'Unknown',
+          responseLength: responseText.length,
+          responsePreview: responseText.substring(0, 500)
+        });
+        res.status(500).json({
+          error: 'Invalid JSON response from Claude API',
+          details: 'Claude did not return valid JSON'
+        });
+        return;
+      }
     }
 
     // Return parsed response to frontend
